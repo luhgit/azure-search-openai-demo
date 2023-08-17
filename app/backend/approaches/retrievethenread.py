@@ -23,19 +23,22 @@ class RetrieveThenReadApproach(AskApproach):
     "For tabular information, return it as an HTML table. Do not return markdown format. " \
     "Each source has a name followed by a colon and the actual information; always include the source name for each fact you use in the response. " \
     "If you cannot answer using the sources below, say you don't know. Use the below example to answer. " \
+    "The name of the source follows a special format: [model_number]_[document_language]-[page_number].pdf. " \
+    "Use this information from source name as well, especially if someone is asking a question about a specific model. " \
+    "You can mention in your answer that I found the information on page X of the manual for model Y. " \
+    "Make sure to add links to the manuals in the answer in the following format: '[WGB256090_EN-54.pdf][SMS8YCI03E_EN-24.pdf]' and not in '[WGB256090_EN-54.pdf, SMS8YCI03E_EN-24.pdf]' " \
 
     #shots/sample conversation
     question = """
 
-    'What is the warranty period for the BSH washing machine model XW123?'
+    'What is the warranty period for the Bosch washing machine model WGB256090?'
 
     Sources:
-    manual1.pdf: Warranty period depends on the model and region. Model XW123 has a 2-year warranty in the US.
-    catalog2.pdf: Model XW123 is a front-loading washing machine with various features including energy-saving mode.
-    info3.pdf: BSH offers extended warranties for some models at an additional cost.
-    info4.pdf: BSH's washing machines are available in various regions including the US, Europe, and Asia.
+    WGB256090_EN-54.pdf: The warrany for the washing machine model WGB256090 is 2 years in the US and 1 year in the EU.
+    SMS8YCI03E_EN-54.pdf: This offer is valid for three years from the date of purchase or at least as long as we offer support and spare parts for the relevant appliance.
+    WGB256090_EN-57.pdf: BSH offers extended warranties for some models at an additional cost. Please contact your retailer for more information.
     """
-    answer = "The warranty period for the BSH washing machine model XW123 is 2 years in the US [manual1.pdf]"
+    answer = "The warranty period for the BSH washing machine model WGB256090 is 2 years in the US and 1 year in the EU. [WGB256090_EN-54.pdf]"
 
     def __init__(self, search_client: SearchClient, openai_deployment: str, chatgpt_model: str, embedding_deployment: str, sourcepage_field: str, content_field: str):
         self.search_client = search_client

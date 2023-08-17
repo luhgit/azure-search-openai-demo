@@ -33,7 +33,10 @@ class ReadRetrieveReadApproach(AskApproach):
     "Each source has a name followed by a colon and the actual data; quote the source name for each piece of data you use in the response. " \
     "For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'manual123: the capacity is 5kg', then answer with 'The capacity is 5kg [manual123]'. " \
     "It's important to strictly follow the format where the name of the source is in square brackets at the end of the sentence, and only up to the prefix before the colon (':'). " \
-    "If there are multiple sources, cite each one in their own square brackets. For example, use '[manual123][catalog76]' and not '[manual123,catalog76]'. " \
+    "If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_EN-54.pdf][SMS8YCI03E_EN-24.pdf]' and not in '[WGB256090_EN-54.pdf, SMS8YCI03E_EN-24.pdf]' . " \
+    "The name of the source follows a special format: [model_number]_[document_language]-[page_number].pdf. " \
+    "Use this information from source name as well, especially if someone is asking a question about a specific model. " \
+    "You can mention in your answer that I found the information on page X of the manual for model Y. " \
     "Never quote tool names as sources. " \
     "If you cannot answer using the sources below, say that you don't know. " \
     "\n\nYou can access to the following tools:"
