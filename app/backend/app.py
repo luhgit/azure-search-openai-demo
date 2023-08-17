@@ -27,6 +27,8 @@ from approaches.readdecomposeask import ReadDecomposeAsk
 from approaches.readretrieveread import ReadRetrieveReadApproach
 from approaches.retrievethenread import RetrieveThenReadApproach
 
+from quart_auth import basic_auth_required
+
 # Replace these with your own values, either in environment variables or directly here
 AZURE_STORAGE_ACCOUNT = os.getenv("AZURE_STORAGE_ACCOUNT", "mystorageaccount")
 AZURE_STORAGE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER", "content")
@@ -53,6 +55,7 @@ APPLICATIONINSIGHTS_CONNECTION_STRING = os.getenv("APPLICATIONINSIGHTS_CONNECTIO
 bp = Blueprint("routes", __name__, static_folder='static')
 
 @bp.route("/")
+@basic_auth_required(username_key="BASIC_AUTH_USERNAME", password_key="BASIC_AUTH_PASSWORD")
 async def index():
     return await bp.send_static_file("index.html")
 
@@ -194,6 +197,13 @@ def create_app():
         configure_azure_monitor()
         AioHttpClientInstrumentor().instrument()
     app = Quart(__name__)
+
+    app.config['BASIC_AUTH_USERNAME'] = 'admin'
+    app.config['BASIC_AUTH_PASSWORD'] = 'BSH2023!'
+
+    print(app.config['BASIC_AUTH_USERNAME'])
+    print(app.config['BASIC_AUTH_PASSWORD'])
+
     app.register_blueprint(bp)
     app.asgi_app = OpenTelemetryMiddleware(app.asgi_app)
 
