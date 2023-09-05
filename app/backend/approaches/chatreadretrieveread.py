@@ -1,5 +1,5 @@
 from typing import Any
-
+import json
 import openai
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import QueryType
@@ -21,31 +21,43 @@ class ChatReadRetrieveReadApproach(ChatApproach):
     top documents from search, then constructs a prompt with them, and then uses OpenAI to generate an completion
     (answer) with that prompt.
     """
-    system_message_chat_conversation = """Assistant helps the company employees with their healthcare plan questions, and questions about the employee handbook. Be brief in your answers.
-Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know. Do not generate answers that don't use the sources below. If asking a clarifying question to the user would help, ask the question.
-For tabular information return it as an html table. Do not return markdown format. If the question is not in English, answer in the language used in the question.
-Each source has a name followed by colon and the actual information, always include the source name for each fact you use in the response. Use square brackets to reference the source, e.g. [info1.txt]. Don't combine sources, list each source separately, e.g. [info1.txt][info2.pdf].
+    system_message_chat_conversation = """Assistant helps BSH company customers with their home appliance questions, including inquiries about purchasing new products, features, configurations, and troubleshooting. 
+Be concise in your answers. 
+Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know. 
+Do not generate answers that don't use the sources below. 
+If asking a clarifying question to the user would help, ask the question. 
+For tabular information, return it as an HTML table. Do not return markdown format. 
+If the question is not in English, answer in the language used in the question. 
+Each source has a name followed by a colon and the actual information; always include the source name for each fact you use in the response. 
+Use square brackets to reference the source, e.g. [manual1.pdf]. Don't combine sources; list each source separately, e.g. [manual1.pdf][catalog2.pdf]. 
 {follow_up_questions_prompt}
 {injected_prompt}
 """
-    follow_up_questions_prompt_content = """Generate three very brief follow-up questions that the user would likely ask next about their healthcare plan and employee handbook.
-Use double angle brackets to reference the questions, e.g. <<Are there exclusions for prescriptions?>>.
-Try not to repeat questions that have already been asked.
-Only generate questions and do not generate any text before or after the questions, such as 'Next Questions'"""
+    follow_up_questions_prompt_content = """Generate three very brief follow-up questions that the user would likely ask next about the home appliance they are interested in or need help with. 
+Use double angle brackets to reference the questions, e.g. <<Is there a warranty on this washing machine?>>. 
+Try not to repeat questions that have already been asked. 
+Only generate questions and do not generate any text before or after the questions, such as 'Next Questions'
+"""
 
-    query_prompt_template = """Below is a history of the conversation so far, and a new question asked by the user that needs to be answered by searching in a knowledge base about employee healthcare plans and the employee handbook.
-Generate a search query based on the conversation and the new question.
-Do not include cited source filenames and document names e.g info.txt or doc.pdf in the search query terms.
+    query_prompt_template = """Below is a history of the conversation so far, and a new question asked by the user that needs to be answered by searching in a knowledge base about BSH company's home appliances, including buying guides, features, configurations, and troubleshooting.
+Identify the language of the question. Generate a search query based on the conversation and the new question.
+Identify the language of the question and provide it in the format like 'en' for English and 'de' for German. Generate a search query based on the conversation and the new question.
+Do not include cited source filenames and document names e.g manual.pdf or catalog.pdf in the search query terms.
 Do not include any text inside [] or <<>> in the search query terms.
 Do not include any special characters like '+'.
-If the question is not in English, translate the question to English before generating the search query.
 If you cannot generate a search query, return just the number 0.
+Return the result in the following JSON format: 
+{
+  "query": "[Your generated query]",
+  "language": "[Detected language]"
+}
+
 """
     query_prompt_few_shots = [
-        {'role' : USER, 'content' : 'What are my health plans?' },
-        {'role' : ASSISTANT, 'content' : 'Show available health plans' },
-        {'role' : USER, 'content' : 'does my plan cover cardio?' },
-        {'role' : ASSISTANT, 'content' : 'Health plan cardio coverage' }
+        {'role' : USER, 'content' : 'how to load the washing machine?' },
+        {'role' : ASSISTANT, 'content' : 'Show the procedure to load a washing machine' },
+        {'role' : USER, 'content' : 'Does my washing machine has wifi?' },
+        {'role' : ASSISTANT, 'content' : 'Check for the wifi feature on the specified washing machine' }
     ]
 
     def __init__(self, search_client: SearchClient, chatgpt_deployment: str, chatgpt_model: str, embedding_deployment: str, sourcepage_field: str, content_field: str):
@@ -67,6 +79,8 @@ If you cannot generate a search query, return just the number 0.
 
         user_q = 'Generate search query for: ' + history[-1]["user"]
 
+        print("prompt for query generation: " + user_q + "\n")
+
         # STEP 1: Generate an optimized keyword search query based on the chat history and the last question
         messages = self.get_messages_from_history(
             self.query_prompt_template,
@@ -76,6 +90,8 @@ If you cannot generate a search query, return just the number 0.
             self.query_prompt_few_shots,
             self.chatgpt_token_limit - len(user_q)
             )
+        
+        print("Message from chat history: " + str(messages) + "\n")
 
         chat_completion = await openai.ChatCompletion.acreate(
             deployment_id=self.chatgpt_deployment,
@@ -84,12 +100,52 @@ If you cannot generate a search query, return just the number 0.
             temperature=0.0,
             max_tokens=32,
             n=1)
+        
+        response_content = chat_completion.choices[0].message.content
+        try:
+            # Extracting query and language from the response
+            response_json = json.loads(response_content)
+            print("Response JSON: " + str(response_json) + "\n")
+            # Check if the response is 0
+            if response_json == 0:
+                raise ValueError("Query generation failed")  # This will be caught by the except block below
 
-        query_text = chat_completion.choices[0].message.content
-        if query_text.strip() == "0":
-            query_text = history[-1]["user"] # Use the last user input if we failed to generate a better query
+            query_text = response_json["query"]
+            language_code = response_json["language"]
+        except (json.JSONDecodeError, KeyError, ValueError):
+            # Handle edge cases where the response is not as expected
+            query_text = history[-1]["user"]
+            language_code = "en"  # Default to English if not specified
+
+        # Define language mapping
+        language_mapping = {
+            "en": "en-us",
+            "de": "de-de"
+        }
+
+        # If the detected language is neither "en" nor "de", default to "en"
+        if language_code not in language_mapping:
+            language_code = "en"
+
+        # Convert the language code to the desired format
+        language_code_with_country = language_mapping[language_code]
+
+
+        # Constructing the language filter
+        language_filter = f"language eq '{language_code_with_country}'"
+
+        print("language code: " + language_code + "\n")
+
+        #if filter:
+        #    filter = f"{filter} and {language_filter}"
+        #else:
+        #    filter = language_filter
+
+        print("language filter: " + language_filter + "\n")
 
         # STEP 2: Retrieve relevant documents from the search index with the GPT optimized query
+
+        print("Generated query: " + query_text + "\n")
 
         # If retrieval mode includes vectors, compute an embedding for the query
         if has_vector:
@@ -106,7 +162,7 @@ If you cannot generate a search query, return just the number 0.
             r = await self.search_client.search(query_text,
                                           filter=filter,
                                           query_type=QueryType.SEMANTIC,
-                                          query_language="en-us",
+                                          query_language=language_code_with_country,
                                           query_speller="lexicon",
                                           semantic_configuration_name="default",
                                           top=top,
@@ -127,7 +183,11 @@ If you cannot generate a search query, return just the number 0.
             results = [doc[self.sourcepage_field] + ": " + nonewlines(doc[self.content_field]) async for doc in r]
         content = "\n".join(results)
 
+        print("Retrieved documents: " + content + "\n")
+
         follow_up_questions_prompt = self.follow_up_questions_prompt_content if overrides.get("suggest_followup_questions") else ""
+
+        print("Follow up questions prompt: " + follow_up_questions_prompt + "\n")
 
         # STEP 3: Generate a contextual and content specific answer using the search results and chat history
 
@@ -146,6 +206,8 @@ If you cannot generate a search query, return just the number 0.
             history,
             history[-1]["user"],
             max_tokens=self.chatgpt_token_limit)
+        
+        print("Message from chat history: " + str(messages) + "\n")
 
         chat_completion = await openai.ChatCompletion.acreate(
             deployment_id=self.chatgpt_deployment,
@@ -154,10 +216,16 @@ If you cannot generate a search query, return just the number 0.
             temperature=overrides.get("temperature") or 0.7,
             max_tokens=1024,
             n=1)
+        
+        print("Generated answer: " + chat_completion.choices[0].message.content + "\n")
 
         chat_content = chat_completion.choices[0].message.content
 
+        print("Chat content: " + chat_content + "\n")
+
         msg_to_display = '\n\n'.join([str(message) for message in messages])
+
+        print("Message to display: " + msg_to_display + "\n")
 
         return {"data_points": results, "answer": chat_content, "thoughts": f"Searched for:<br>{query_text}<br><br>Conversations:<br>" + msg_to_display.replace('\n', '<br>')}
 
