@@ -207,15 +207,27 @@ def filename_to_id(filename):
     filename_hash = base64.b16encode(filename.encode('utf-8')).decode('ascii')
     return f"file-{filename_ascii}-{filename_hash}"
 
+def extract_fields_from_filename(filename):
+    pattern = r'^(?P<product_id>[^_]+)_(?P<language>[^_]+)_(?P<product_type>[^\.]+)\.pdf$'
+    match = re.match(pattern, filename)
+    if match:
+        return match.groupdict()
+    return None
+
 def create_sections(filename, page_map, use_vectors):
     file_id = filename_to_id(filename)
+    meta_info = extract_fields_from_filename(filename)
+
     for i, (content, pagenum) in enumerate(split_text(page_map)):
         section = {
             "id": f"{file_id}-page-{i}",
             "content": content,
             "category": args.category,
             "sourcepage": blob_name_from_file_page(filename, pagenum),
-            "sourcefile": filename
+            "sourcefile": filename,
+            "product_id": meta_info["product_id"],
+            "language": meta_info["language"],
+            "product_type": meta_info["product_type"]
         }
         if use_vectors:
             section["embedding"] = compute_embedding(content)
@@ -237,13 +249,16 @@ def create_search_index():
             name=args.index,
             fields=[
                 SimpleField(name="id", type="Edm.String", key=True),
-                SearchableField(name="content", type="Edm.String", analyzer_name="en.microsoft"),
+                SearchableField(name="content", type="Edm.String", analyzer_name="standard.lucene"),
                 SearchField(name="embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
                             hidden=False, searchable=True, filterable=False, sortable=False, facetable=False,
                             vector_search_dimensions=1536, vector_search_configuration="default"),
                 SimpleField(name="category", type="Edm.String", filterable=True, facetable=True),
                 SimpleField(name="sourcepage", type="Edm.String", filterable=True, facetable=True),
-                SimpleField(name="sourcefile", type="Edm.String", filterable=True, facetable=True)
+                SearchableField(name="sourcefile", type="Edm.String", analyzer_name="standard.lucene", filterable=True, facetable=True),
+                SimpleField(name="product_id", type="Edm.String", filterable=True, facetable=True),
+                SimpleField(name="language", type="Edm.String", filterable=True, facetable=True),
+                SimpleField(name="product_type", type="Edm.String", filterable=True, facetable=True)
             ],
             semantic_settings=SemanticSettings(
                 configurations=[SemanticConfiguration(
