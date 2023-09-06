@@ -41,28 +41,44 @@ Use double angle brackets to reference the questions, e.g. <<Is there a warranty
 Try not to repeat questions that have already been asked. 
 Only generate questions and do not generate any text before or after the questions, such as 'Next Questions'
 """
-
+    
     query_prompt_template = """Below is a history of the conversation so far, and a new question asked by the user that needs to be answered by searching in a knowledge base about BSH company's home appliances, including buying guides, features, configurations, and troubleshooting.
-Identify the language of the question. Generate a search query based on the conversation and the new question.
-Identify the language of the question and provide it in the format like 'en' for English and 'de' for German. Generate a search query based on the conversation and the new question.
-Do not include cited source filenames and document names e.g manual.pdf or catalog.pdf in the search query terms.
+Generate a search query based on the conversation and the new question. 
+Do not include cited source filenames and document names e.g info.txt or doc.pdf in the search query terms.
 Do not include any text inside [] or <<>> in the search query terms.
 Do not include any special characters like '+'.
+If the question is not in English, translate the question to English before generating the search query.
 If you cannot generate a search query, return just the number 0.
-Return the result in the following JSON format: 
-{
-  "query": "[Your generated query]",
-  "language": "[Detected language]"
-}
-
 """
     query_prompt_few_shots = [
-        {'role' : USER, 'content' : 'how to load the washing machine?' },
-        {'role' : ASSISTANT, 'content' : 'Show the procedure to load a washing machine' },
-        {'role' : USER, 'content' : 'Does my washing machine has wifi?' },
-        {'role' : ASSISTANT, 'content' : 'Check for the wifi feature on the specified washing machine' }
-    
-    ]
+{'role' : USER, 'content' : 'how to load the washing machine?' },
+{'role' : ASSISTANT, 'content' : 'Show the procedure to load a washing machine' },
+{'role' : USER, 'content' : 'Does my washing machine has wifi?' },
+{'role' : ASSISTANT, 'content' : 'Check for the wifi feature on the specified washing machine' }
+
+]
+
+    filter_prompt_template = """Below is a history of the conversation so far, and a new question asked by the user. 
+First step: identify the language of the question and return "en-us" if it's in english and "de-de" if it's in german.
+If you don't know the language, return "unknown".
+Possible aswers are: "en-us", "de-de", "unknown".
+Second step: identify the product mentioned in the question and return the product id.
+If you don't know the which product the client is talking about because it's not mentioned explicitly in the question, return "unknown".
+Product ids are only "SMS6TCI00E", "WUU28TA8", if it's not one of these two, return "unknown".
+Possible answers are: "SMS6TCI00E", "WUU28TA8", "unknown".
+
+Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
+"""
+
+    filter_prompt_few_shots = [
+{'role' : USER, 'content' : 'how to load the washing machine?' },
+{'role' : ASSISTANT, 'content' : 'en-us,unknown' }, 
+{'role' : USER, 'content' : 'what are the available programms for SMS6TCI00E whashing machine?' },
+{'role' : ASSISTANT, 'content' : 'en-us,SMS6TCI00E' }, 
+{'role' : USER, 'content' : 'what are the available programms for the whashing machine?' },
+{'role' : ASSISTANT, 'content' : 'en-us,unknown' }
+]
+
 
     def __init__(self, search_client: SearchClient, chatgpt_deployment: str, chatgpt_model: str, embedding_deployment: str, sourcepage_field: str, content_field: str):
         self.search_client = search_client
@@ -78,14 +94,51 @@ Return the result in the following JSON format:
         has_vector = overrides.get("retrieval_mode") in ["vectors", "hybrid", None]
         use_semantic_captions = True if overrides.get("semantic_captions") and has_text else False
         top = overrides.get("top") or 3
-        exclude_category = overrides.get("exclude_category") or None
-        filter = "category ne '{}'".format(exclude_category.replace("'", "''")) if exclude_category else None
-
-        user_q = 'Generate search query for: ' + history[-1]["user"]
+        
+        ### FILTERING step definition ###
+        user_q = 'User question: ' + history[-1]["user"]
 
         print("prompt for query generation: " + user_q + "\n")
 
         # STEP 1: Generate an optimized keyword search query based on the chat history and the last question
+        messages_filtering = self.get_messages_from_history(
+            self.filter_prompt_template,
+            self.chatgpt_model,
+            history,
+            user_q,
+            self.filter_prompt_few_shots,
+            self.chatgpt_token_limit - len(user_q)
+            )
+
+        print("Message from chat history: " + str(messages_filtering) + "\n")
+
+        chat_completion_filter = await openai.ChatCompletion.acreate(
+            deployment_id=self.chatgpt_deployment,
+            model=self.chatgpt_model,
+            messages=messages_filtering,
+            temperature=0.0,
+            max_tokens=32,
+            n=1)
+
+        filtering_content = chat_completion_filter.choices[0].message.content
+        language_code_with_country, product_query = filtering_content.split(",")
+        # Constructing the language filter
+        if language_code_with_country in ["en-us", "de-de"]:
+            language_filter = f"language eq '{language_code_with_country}'"
+            if product_query != "unknown":
+                product_filter = f"product_id eq '{product_query}'"
+                language_filter = f"{language_filter} and {product_filter}"
+        else:
+            language_filter = "language eq 'en-us'"
+            if product_query != "unknown":
+                product_filter = f"product_id eq '{product_query}'"
+                language_filter = f"{language_filter} and {product_filter}"
+        print("Filter: " + language_filter + "\n")
+
+        #### STEP 2: Generate an optimized keyword search query based on the chat history and the last question
+        user_q = 'Generate search query for: ' + history[-1]["user"]
+        print("prompt for query generation: " + user_q + "\n")
+
         messages = self.get_messages_from_history(
             self.query_prompt_template,
             self.chatgpt_model,
@@ -94,7 +147,7 @@ Return the result in the following JSON format:
             self.query_prompt_few_shots,
             self.chatgpt_token_limit - len(user_q)
             )
-        
+
         print("Message from chat history: " + str(messages) + "\n")
 
         chat_completion = await openai.ChatCompletion.acreate(
@@ -104,67 +157,27 @@ Return the result in the following JSON format:
             temperature=0.0,
             max_tokens=32,
             n=1)
-        
+
         response_content = chat_completion.choices[0].message.content
-        try:
-            # Extracting query and language from the response
-            response_json = json.loads(response_content)
-            print("Response JSON: " + str(response_json) + "\n")
-            # Check if the response is 0
-            if response_json == 0:
-                raise ValueError("Query generation failed")  # This will be caught by the except block below
+        
+        # STEP 3: Retrieve relevant documents from the search index with the GPT optimized query
 
-            query_text = response_json["query"]
-            language_code = response_json["language"]
-        except (json.JSONDecodeError, KeyError, ValueError):
-            # Handle edge cases where the response is not as expected
-            query_text = history[-1]["user"]
-            language_code = "en"  # Default to English if not specified
-
-        # Define language mapping
-        language_mapping = {
-            "en": "en-us",
-            "de": "de-de"
-        }
-
-        # If the detected language is neither "en" nor "de", default to "en"
-        if language_code not in language_mapping:
-            language_code = "en"
-
-        # Convert the language code to the desired format
-        language_code_with_country = language_mapping[language_code]
-
-
-        # Constructing the language filter
-        language_filter = f"language eq '{language_code_with_country}'"
-
-        print("language code: " + language_code + "\n")
-
-        #if filter:
-        #    filter = f"{filter} and {language_filter}"
-        #else:
-        #    filter = language_filter
-
-        print("language filter: " + language_filter + "\n")
-
-        # STEP 2: Retrieve relevant documents from the search index with the GPT optimized query
-
-        print("Generated query: " + query_text + "\n")
+        print("Generated query: " + response_content + "\n")
 
         # If retrieval mode includes vectors, compute an embedding for the query
         if has_vector:
-            query_vector = (await openai.Embedding.acreate(engine=self.embedding_deployment, input=query_text))["data"][0]["embedding"]
+            query_vector = (await openai.Embedding.acreate(engine=self.embedding_deployment, input=response_content))["data"][0]["embedding"]
         else:
             query_vector = None
 
          # Only keep the text query if the retrieval mode uses text, otherwise drop it
         if not has_text:
-            query_text = None
+            response_content = None
 
         # Use semantic L2 reranker if requested and if retrieval mode is text or hybrid (vectors + text)
         if overrides.get("semantic_ranker") and has_text:
-            r = await self.search_client.search(query_text,
-                                          filter=filter,
+            r = await self.search_client.search(response_content,
+                                          filter=language_filter,
                                           query_type=QueryType.SEMANTIC,
                                           query_language=language_code_with_country,
                                           query_speller="lexicon",
@@ -175,8 +188,8 @@ Return the result in the following JSON format:
                                           top_k=50 if query_vector else None,
                                           vector_fields="embedding" if query_vector else None)
         else:
-            r = await self.search_client.search(query_text,
-                                          filter=filter,
+            r = await self.search_client.search(response_content,
+                                          filter=language_filter,
                                           top=top,
                                           vector=query_vector,
                                           top_k=50 if query_vector else None,
@@ -231,7 +244,7 @@ Return the result in the following JSON format:
 
         print("Message to display: " + msg_to_display + "\n")
 
-        return {"data_points": results, "answer": chat_content, "thoughts": f"Searched for:<br>{query_text}<br><br>Conversations:<br>" + msg_to_display.replace('\n', '<br>')}
+        return {"data_points": results, "answer": chat_content, "thoughts": f"Searched for:<br>{response_content}<br><br>Conversations:<br>" + msg_to_display.replace('\n', '<br>')}
 
     def get_messages_from_history(self, system_prompt: str, model_id: str, history: list[dict[str, str]], user_conv: str, few_shots = [], max_tokens: int = 4096) -> list:
         message_builder = MessageBuilder(system_prompt, model_id)
