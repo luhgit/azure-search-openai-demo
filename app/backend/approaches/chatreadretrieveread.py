@@ -3,6 +3,7 @@ import json
 import openai
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import QueryType
+import re
 
 from approaches.approach import ChatApproach
 from core.messagebuilder import MessageBuilder
@@ -28,13 +29,21 @@ Do not generate answers that don't use the sources below and avoid to just cite 
 If asking a clarifying question to the user would help, ask the question. 
 For tabular information, return it as an HTML table. Do not return markdown format. 
 If the question is not in English, answer in the language used in the question. 
-Each source has a name followed by a colon and the actual information; always include the source name for each fact you use in the response without referring to the sources. 
+Each source has a name followed by a colon and the actual information; always include the source name for each fact you use but first try to give an answer and then provide the source you are using. 
 For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_EN-54.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_EN-54.pdf]'. 
 If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_EN-54.pdf][SMS8YCI03E_EN-24.pdf]' and not in '[WGB256090_EN-54.pdf, SMS8YCI03E_EN-24.pdf]'. 
 The name of the source follows a special format: <model_number>_<document_language>-<page_number>.pdf. 
 You can Use this information from source name, especially if someone is asking a question about a specific model.
 {follow_up_questions_prompt}
 {injected_prompt}
+"""
+
+    system_message_chat_conversation_no_sources = """You are a customer service assistant for BSH company.
+Start thanking the user for his question and please say that unfortunately you cannot anwer with the information available.
+If the user is referring to a specific product id, ask to try to double check the product id.
+If the question is not that clear, politely ask to reformulate it.
+For example, if the question is 'what are the available programms for SMS6TCI00E washing machine?' then answer with 'Unfortunately I cannot answer to your question. Can you please double check the product id?'
+If the question is 'what are the available programms for washing machine?' then answer with 'Unfortunately I cannot answer to your question. Can you please reformulate it?
 """
     follow_up_questions_prompt_content = """Generate three very brief follow-up questions that the user would likely ask next about the home appliance they are interested in or need help with. 
 Use double angle brackets to reference the questions, e.g. <<Is there a warranty on this washing machine?>>. 
@@ -59,24 +68,25 @@ If you cannot generate a search query, return just the number 0.
 ]
 
     filter_prompt_template = """Below is a history of the conversation so far, and a new question asked by the user. 
-First step: identify the language of the question and return "en-us" if it's in english and "de-de" if it's in german.
+First step: identify the language of the LAST user question and return "en-us" if it's in english and "de-de" if it's in german.
 If you don't know the language, return "unknown".
-Possible aswers are: "en-us", "de-de", "unknown".
-Second step: identify the product mentioned in the question and return the product id.
+Possible answers are: "en-us", "de-de", "unknown".
+Second step: identify the product mentioned in the question and return the product id. 
+The product id could be mentioned in the history. Be sure the last question is still referring to the product id.
 If you don't know the which product the client is talking about because it's not mentioned explicitly in the question, return "unknown".
-Product ids are only "SMS6TCI00E", "WUU28TA8", if it's not one of these two, return "unknown".
-Possible answers are: "SMS6TCI00E", "WUU28TA8", "unknown".
-
+Product ids are only alpha-numeric characters like "SMS6TCI00E", "WUU28TA8", if it's not clear, return "unknown".
+Possible answers are: "SMS6TCI00E", "WUU28TA8", ..., "unknown".
+ 
 Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
 """
 
     filter_prompt_few_shots = [
 {'role' : USER, 'content' : 'how to load the washing machine?' },
 {'role' : ASSISTANT, 'content' : 'en-us,unknown' }, 
-{'role' : USER, 'content' : 'what are the available programms for SMS6TCI00E whashing machine?' },
+{'role' : USER, 'content' : 'what are the available programms for SMS6TCI00E washing machine?' },
 {'role' : ASSISTANT, 'content' : 'en-us,SMS6TCI00E' }, 
-{'role' : USER, 'content' : 'what are the available programms for the whashing machine?' },
-{'role' : ASSISTANT, 'content' : 'en-us,unknown' }
+{'role' : USER, 'content' : 'what are the available programms for SMD6TCX00E washing machine?' },
+{'role' : ASSISTANT, 'content' : 'en-us,SMD6TCX00E' }
 ]
 
 
@@ -122,18 +132,21 @@ Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
 
         filtering_content = chat_completion_filter.choices[0].message.content
         language_code_with_country, product_query = filtering_content.split(",")
-        # Constructing the language filter
+        # Constructing the language and product id filter
+        
         if language_code_with_country in ["en-us", "de-de"]:
             language_filter = f"language eq '{language_code_with_country}'"
-            if product_query != "unknown":
-                product_filter = f"product_id eq '{product_query}'"
-                language_filter = f"{language_filter} and {product_filter}"
         else:
             language_filter = "language eq 'en-us'"
-            if product_query != "unknown":
-                product_filter = f"product_id eq '{product_query}'"
-                language_filter = f"{language_filter} and {product_filter}"
-        print("Filter: " + language_filter + "\n")
+
+        pattern = r'^[A-Z]{3}[A-Z0-9]{5,9}$'
+        if re.match(pattern, product_query):
+            product_filter = f"product_id eq '{product_query}'"
+            filter = f"{language_filter} and {product_filter}"
+        else:
+            filter = language_filter
+        
+        print("Filter: " + filter + "\n")
 
         #### STEP 2: Generate an optimized keyword search query based on the chat history and the last question
         user_q = 'Generate search query for: ' + history[-1]["user"]
@@ -177,7 +190,7 @@ Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
         # Use semantic L2 reranker if requested and if retrieval mode is text or hybrid (vectors + text)
         if overrides.get("semantic_ranker") and has_text:
             r = await self.search_client.search(response_content,
-                                          filter=language_filter,
+                                          filter=filter,
                                           query_type=QueryType.SEMANTIC,
                                           query_language=language_code_with_country,
                                           query_speller="lexicon",
@@ -189,7 +202,7 @@ Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
                                           vector_fields="embedding" if query_vector else None)
         else:
             r = await self.search_client.search(response_content,
-                                          filter=language_filter,
+                                          filter=filter,
                                           top=top,
                                           vector=query_vector,
                                           top_k=50 if query_vector else None,
@@ -199,7 +212,7 @@ Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
         else:
             results = [doc[self.sourcepage_field] + ": " + nonewlines(doc[self.content_field]) async for doc in r]
         content = "\n".join(results)
-
+        
         print("Retrieved documents: " + content + "\n")
 
         follow_up_questions_prompt = self.follow_up_questions_prompt_content if overrides.get("suggest_followup_questions") else ""
@@ -217,10 +230,11 @@ Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
         else:
             system_message = prompt_override.format(follow_up_questions_prompt=follow_up_questions_prompt)
 
+        new_history = history if len(content) > 0 else [h for h in history[-1:] if h.get("user")]
         messages = self.get_messages_from_history(
-            system_message + "\n\nSources:\n" + content,
+            system_message + "\n\nSources:\n" + content if len(content) > 0 else self.system_message_chat_conversation_no_sources,
             self.chatgpt_model,
-            history,
+            new_history, 
             history[-1]["user"],
             max_tokens=self.chatgpt_token_limit)
         
@@ -250,7 +264,7 @@ Return the two answers separated by a comma, e.g. "en-us,SMS6TCI00E".
         message_builder = MessageBuilder(system_prompt, model_id)
 
         # Add examples to show the chat what responses we want. It will try to mimic any responses and make sure they match the rules laid out in the system message.
-        for shot in few_shots:
+        for shot in few_shots[::-1]:
             message_builder.append_message(shot.get('role'), shot.get('content'))
 
         user_content = user_conv
