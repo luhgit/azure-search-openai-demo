@@ -208,7 +208,7 @@ def filename_to_id(filename):
     return f"file-{filename_ascii}-{filename_hash}"
 
 def extract_fields_from_filename(filename):
-    pattern = r'^(?P<product_id>[^_]+)_(?P<language>[^_]+)_(?P<product_type>[^\.]+)\.pdf$'
+    pattern = r'^(?P<product_id>[^_]+)_(?P<language>[^_]+)_(?P<product_type>[^_]+)_(?P<doc_type>[^\.]+)\.pdf$'
     match = re.match(pattern, filename)
     if match:
         return match.groupdict()
@@ -227,7 +227,8 @@ def create_sections(filename, page_map, use_vectors):
             "sourcefile": filename,
             "product_id": meta_info["product_id"],
             "language": meta_info["language"],
-            "product_type": meta_info["product_type"]
+            "product_type": meta_info["product_type"],
+            "doc_type": meta_info["doc_type"]
         }
         if use_vectors:
             section["embedding"] = compute_embedding(content)
@@ -258,7 +259,8 @@ def create_search_index():
                 SearchableField(name="sourcefile", type="Edm.String", analyzer_name="standard.lucene", filterable=True, facetable=True),
                 SimpleField(name="product_id", type="Edm.String", filterable=True, facetable=True),
                 SimpleField(name="language", type="Edm.String", filterable=True, facetable=True),
-                SimpleField(name="product_type", type="Edm.String", filterable=True, facetable=True)
+                SimpleField(name="product_type", type="Edm.String", filterable=True, facetable=True),
+                SimpleField(name="doc_type", type="Edm.String", filterable=True, facetable=True)
             ],
             semantic_settings=SemanticSettings(
                 configurations=[SemanticConfiguration(

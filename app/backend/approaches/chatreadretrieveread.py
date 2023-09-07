@@ -31,9 +31,9 @@ If asking a clarifying question to the user would help, ask the question.
 For tabular information, return it as an HTML table. Do not return markdown format. 
 If the question is not in English, answer in the language used in the question. 
 Each source has a name followed by a colon and the actual information; always include the source name for each fact you use in the response without referring to the sources. 
-For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_EN-54.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_EN-54.pdf]'. 
-If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_EN-54.pdf][SMS8YCI03E_EN-24.pdf]' and not in '[WGB256090_EN-54.pdf, SMS8YCI03E_EN-24.pdf]'. 
-The name of the source follows a special format: <model_number>_<document_language>-<page_number>.pdf. 
+For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_en-us_dishwasher_manual-54.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_en-us_dishwasher_manual-54.pdf]'. 
+If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_en-us_dishwasher_manual-54.pdf][SMS8YCI03E_en-us_dishwasher_manual-24.pdf]' and not in '[WGB256090_en-us_dishwasher_manual-54.pdf, SMS8YCI03E_en-us_dishwasher_manual-24.pdf]'. 
+The name of the source follows a special format: <model_number>_<document_language>_<doc_type>-<page_number>.pdf. 
 You can Use this information from source name, especially if someone is asking a question about a specific model.
 {follow_up_questions_prompt}
 {injected_prompt}
@@ -60,10 +60,6 @@ Return the query enclosed in the quotes for e.g., 'washing machine installation 
 If the message is in English, return "en-us". 
 If the message is in German, return "de-de". 
 If you cannot determine the language, return "unknown".
-
-For example:
-- For the message "Hello, how are you?", the answer is "en-us".
-- For the message "Hallo, wie geht es Ihnen?", the answer is "de-de".
 
 Ensure you return the correct language code enclosed in quotes, like 'en-us' or 'de-de'.
 """
