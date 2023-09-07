@@ -149,7 +149,7 @@ export function Component(): JSX.Element {
                 </div>
             </div>
             <div className={styles.oneshotBottomSection}>
-                {isLoading && <Spinner label="Generating answer" />}
+                {isLoading && <Spinner label="writing" />}
                 {!lastQuestionRef.current && <ExampleList onExampleClicked={onExampleClicked} />}
                 {!isLoading && answer && !error && (
                     <div className={styles.oneshotAnswerContainer}>
