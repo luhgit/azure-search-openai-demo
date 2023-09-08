@@ -26,15 +26,19 @@ class ChatReadRetrieveReadApproach(ChatApproach):
     system_message_chat_conversation = """You are a customer service assistant for BSH company, helping customers with their home appliance questions, including inquiries about purchasing new products, features, configurations, and troubleshooting.
 Start answering thanking the user for their question. Respond in a slightly informal, and helpful tone, with a brief and clear answers. 
 Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know without referring to the sources. 
-Do not generate answers that don't use the sources below and avoid to just cite the source without answering the question. 
+Try to answer the question in detail and avoid to just cite the source without answering the question.
+If the question is about a specific product, describe the answer in details and avoid referring to sources if possible. e.g., providing a step by step guidance in your response.
+Avoid refering the user to the product manual or catalog and try to answer the question directly.
 If asking a clarifying question to the user would help, ask the question. 
 For tabular information, return it as an HTML table. Do not return markdown format. 
-If the question is not in English, answer in the language used in the question. 
-Each source has a name followed by a colon and the actual information; always include the source name for each fact you use in the response without referring to the sources. 
-For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_en-us_dishwasher_manual-54.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_en-us_dishwasher_manual-54.pdf]'. 
-If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_en-us_dishwasher_manual-54.pdf][SMS8YCI03E_en-us_dishwasher_manual-24.pdf]' and not in '[WGB256090_en-us_dishwasher_manual-54.pdf, SMS8YCI03E_en-us_dishwasher_manual-24.pdf]'. 
-The name of the source follows a special format: <model_number>_<document_language>_<doc_type>-<page_number>.pdf. 
-You can Use this information from source name, especially if someone is asking a question about a specific model.
+If the question is not in English, answer in the language used in the question.
+Do not generate answers that don't use the sources below.
+Each source has a name followed by a colon and the actual information contained within the source.
+Always include the source name for each fact you use in the response. 
+For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_en-us_dishwasher_product-manual-3.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_en-us_dishwasher_product-manual-3.pdf]'. 
+Cite the only the source names that are provided to you and do not mention sources that are not known to you.
+Cite the exact name of the source as provided to you and do not change the source name.
+If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_en-us_dishwasher_prodcut-manual-54.pdf][SMS8YCI03E_en-us_dishwasher_product-manual-12.pdf]' and not in '[WGB256090_en-us_dishwasher_product-manual-54.pdf, SMS8YCI03E_en-us_dishwasher_manual-12.pdf]'.
 {follow_up_questions_prompt}
 {injected_prompt}
 """
@@ -56,52 +60,26 @@ If you cannot generate a search query, return just the number 0.
 Return the query enclosed in the quotes for e.g., 'washing machine installation procedure'
 """
 
-    filter_prompt_template = """Based on the most recent user message in the conversation history below, accurately identify the language of the new message. 
+    language_filter_prompt_template = """Based on the most recent user message in the conversation history below:
+Accurately identify the language of the message.
 If the message is in English, return "en-us". 
 If the message is in German, return "de-de". 
 If you cannot determine the language, return "unknown".
 
-Ensure you return the correct language code enclosed in quotes, like 'en-us' or 'de-de'.
+Ensure you return the answer in the following format e.g., 'en-us', 'de-de', 'unknown'.
 """
 
-#     query_prompt_template = """Below is a history of the conversation so far, and a new question asked by the user that needs to be answered by searching in a knowledge base about BSH company's home appliances, including buying guides, features, configurations, and troubleshooting.
-# Identify the language of the new question and provide it in the format like 'en' for English and 'de' for German.
-# Generate a search query based on the conversation including the new question. If you cannot generate a search query, return just the number 0.
-# Identify and extract any mentioned product ID, model number, ENR number, serial number, WIP number, or any other identifier based on the entire conversation history. If you cannot find one then just return None.
-# This number represents a unique product identifier. Use this identifier to generate a search query based on the latest user question.
-# Do not include cited source filenames and document names e.g manual.pdf or catalog.pdf in the search query terms.
-# Do not include any text inside [] or <<>> in the search query terms.
-# Do not include any special characters like '+'.
-# Return the result in the following JSON format: 
-# {
-#   "query": "[Your generated query]",
-#   "language": "[Detected language]",
-#   "product_id": "[Extracted product ID]"
-# }
-# """
+    product_filter_template = """Based on the entire conversation history below:
+Accurately identify the product id.
+Even if it's from previous messages in the conversation. 
+If there are multiple product ids, return the most recent one.
+Ensure that the last question is still referring to the correct product id.
+Product ids are made of alpha-numeric characters like "SMS6TCI00E", "WUU28TA8". 
+If the product ID isn't clear or not mentioned, return "unknown".
+If the question is general and not about a specific product, return "unknown".
 
-#     query_prompt_template = """Below is a history of the conversation so far, and a new question asked by the user that needs to be answered by searching in a knowledge base about BSH company's home appliances, including buying guides, features, configurations, and troubleshooting.
-# Identify the language of the most recent user message and provide it in the format like 'en' for English and 'de' for German.
-
-# Most recent user message: '{recent_message}'
-
-# Generate a search query based on the conversation history for the most recent user message question. If you cannot generate a search query, return just the number 0.
-# Additionally, Identify and extract any mentioned product ID, model number, ENR number, serial number, WIP number, or any other identifier based on the entire conversation history. If you cannot find one then just return None.
-
-# Conversation history: {history_content}
-
-# This number represents a unique product identifier. Use this identifier to generate a search query based on the latest user question.
-# Do not include cited source filenames and document names e.g manual.pdf or catalog.pdf in the search query terms.
-# Do not include any text inside [] or <<>> in the search query terms.
-# Do not include any special characters like '+'.
-
-# Return the result in the following JSON format: 
-# {{
-#   "query": "[Your generated query]",
-#   "language": "[Detected language]",
-#   "product_id": "[Extracted product ID]"
-# }}
-# """
+Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28TA8', 'unknown'.
+"""
 
     query_prompt_few_shots = [
         {'role' : USER, 'content' : 'how to load the washing machine?' },
@@ -110,13 +88,24 @@ Ensure you return the correct language code enclosed in quotes, like 'en-us' or 
         {'role' : ASSISTANT, 'content' : 'Check for the wifi feature on the specified washing machine' }
     ]
 
-    filter_prompt_few_shots = [
+    language_filter_prompt_few_shots = [
         {'role' : USER, 'content' : 'how to load the washing machine?' },
-        {'role' : ASSISTANT, 'content' : 'en-us'}, 
+        {'role' : ASSISTANT, 'content' : 'en-us'},
         {'role' : USER, 'content' : 'Gibt es Wifi auf meine Waschmachine mit produkt nummer WGB256090?' },
         {'role' : ASSISTANT, 'content' : 'de-de'},
         {'role' : USER, 'content' : 'what are the available programms for SMS6TCI00E washing machine?' },
-        {'role' : ASSISTANT, 'content' : 'en-us'},
+        {'role' : ASSISTANT, 'content' : 'en-us'}
+    ]
+
+    product_filter_prompt_few_shots = [
+        {'role' : USER, 'content' : 'Gibt es Wifi auf meine Waschmachine mit produkt nummer WGB256090?' },
+        {'role' : ASSISTANT, 'content' : 'WGB256090'},
+        {'role' : USER, 'content' : 'what are the available programms for washing machine I mentioned?' },
+        {'role' : ASSISTANT, 'content' : 'WGB256090'},
+        {'role' : USER, 'content' : 'how to load a washing machine?' },
+        {'role' : ASSISTANT, 'content' : 'unknown'},
+        {'role' : USER, 'content' : 'what are the dimentions for washing machine: SMD6TCX00E?' },
+        {'role' : ASSISTANT, 'content' : 'SMD6TCX00E'}
     ]
 
     def __init__(self, search_client: SearchClient, chatgpt_deployment: str, chatgpt_model: str, embedding_deployment: str, sourcepage_field: str, content_field: str):
@@ -164,115 +153,75 @@ Ensure you return the correct language code enclosed in quotes, like 'en-us' or 
         print("Message from chat history for query generation: " + str(messages_query) + "\n")
         print("Generated query: " + query_text)
         
-        filter_q = 'Detect the language for: ' + history[-1]["user"]
-
         # STEP 2: Gnerate a language filter based on the chat history and the new question
-        messages_filter = self.get_messages_from_history(
-            self.filter_prompt_template,
+        language_filter_q = 'Detect the language for: ' + history[-1]["user"]
+        messages_language_filter = self.get_messages_from_history(
+            self.language_filter_prompt_template,
             self.chatgpt_model,
             history,
-            filter_q,
-            self.filter_prompt_few_shots,
-            self.chatgpt_token_limit - len(filter_q)
+            language_filter_q,
+            self.language_filter_prompt_few_shots,
+            self.chatgpt_token_limit - len(language_filter_q)
             )
 
         chat_completion_filter = await openai.ChatCompletion.acreate(
             deployment_id=self.chatgpt_deployment,
             model=self.chatgpt_model,
-            messages=messages_filter,
+            messages=messages_language_filter,
             temperature=0.0,
             max_tokens=32,
             n=1)
         
-        filter_content = chat_completion_filter.choices[0].message.content
+        language_filter_content = chat_completion_filter.choices[0].message.content
 
-        print("Message from chat history for filter generation: " + str(messages_filter))
-        print("Generated filter: " + filter_content + "\n")
+        print("Message from chat history for language filter generation: " + str(messages_language_filter))
+        print("Generated language: " + language_filter_content + "\n")
 
-        language_code = filter_content
+        # STEP 3: Gnerate a product filter based on the chat history and the new question
+        product_filter_q = 'Detect the product id for: ' + history[-1]["user"]
+        messages_product_filter = self.get_messages_from_history(
+            self.product_filter_template,
+            self.chatgpt_model,
+            history,
+            product_filter_q,
+            self.product_filter_prompt_few_shots,
+            self.chatgpt_token_limit - len(product_filter_q)
+            )
+
+        chat_completion_filter = await openai.ChatCompletion.acreate(
+            deployment_id=self.chatgpt_deployment,
+            model=self.chatgpt_model,
+            messages=messages_product_filter,
+            temperature=0.0,
+            max_tokens=32,
+            n=1)
+        
+        product_filter_content = chat_completion_filter.choices[0].message.content
+
+        print("Message from chat history for product filter generation: " + str(messages_product_filter))
+        print("Generated product: " + product_filter_content + "\n")
+
+        language_code = language_filter_content
         if language_code not in ['en-us', 'de-de']:
             language_code = 'en-us'
         language_filter = f"language eq '{language_code}'"
+        
+        product_filter = None
+        product_id = product_filter_content
+        pattern = r'^[A-Za-z]{3}[0-9][0-9a-zA-Z]{4,8}$'
+        if re.match(pattern, product_id):
+            product_filter = f"product_id eq '{product_id}'"
 
         if filter:
             filter = f"{filter} and {language_filter}"
+            if product_filter:
+                filter = f"{filter} and {product_filter}"
         else:
             filter = language_filter
-        
-        # response_content = chat_completion.choices[0].message.content
-        # product_id = None
+            if product_filter:
+                filter = f"{filter} and {product_filter}"
 
-        # try:
-        #     # Extracting query and language from the response
-        #     response_json = json.loads(response_content)
-        #     print('LLM output', response_json)
-
-        #     # Check if the response is 0
-        #     if response_json == 0:
-        #         raise ValueError("Query generation failed")  # This will be caught by the except block below
-
-        #     query_text = response_json["query"]
-        #     language_code = response_json["language"]
-
-        #     if query_text == 0:
-        #         query_text = history[-1]["user"]
-
-        #     # Extract product_id if available in the response
-        #     if "product_id" in response_json and response_json["product_id"]:
-        #         product_id = response_json["product_id"]
-
-        # except (json.JSONDecodeError, KeyError, ValueError):
-        #     # Handle edge cases where the response is not as expected
-        #     query_text = history[-1]["user"]
-        #     language_code = "en"  # Default to English if not specified
-
-        # # Define language mapping
-        # language_mapping = {
-        #     "en": "en-us",
-        #     "de": "de-de"
-        # }
-
-        # # If the detected language is neither "en" nor "de", default to "en"
-        # if language_code not in language_mapping:
-        #     language_code = "en"
-
-        # # Convert the language code to the desired format
-        # language_code_with_country = language_mapping[language_code]
-
-        # # Constructing the language filter
-        # language_filter = f"language eq '{language_code_with_country}'"
-        
-        # # If product_id is still None, attempt to extract it from the conversation history
-        # if product_id is None:
-        #     for message in reversed(history):
-        #         match = re.search(r'\b([A-Za-z]{3}[0-9][0-9a-zA-Z]{4,6})\b', message.get('user', ''))
-        #         if match:
-        #             product_id = match.group(1).upper()  # Capitalize the product ID
-        #             break
-
-        # print("language code: " + language_code + "\n")
-        # print(f"product id: {product_id}")
-
-        # # Constructing the product_id filter if available
-        # product_filter = ""
-        # if product_id:
-        #     product_filter = f"product_id eq '{product_id}'"
-
-        # print(f"Intial filter: {filter}")
-        # # Combine the filters
-        # if filter:
-        #     filter = f"{filter} and {language_filter}"
-        #     if product_filter:
-        #         filter = f"{filter} and {product_filter}"
-        # else:
-        #     filter = language_filter
-        #     if product_filter:
-        #         filter = f"{filter} and {product_filter}"
-
-        # print("language filter: " + language_filter + "\n")
-        # print("product filter: " + product_filter + "\n")
-
-        # STEP 2: Retrieve relevant documents from the search index with the GPT optimized query
+        # STEP 4: Retrieve relevant documents from the search index with the GPT optimized query
 
         # If retrieval mode includes vectors, compute an embedding for the query
         if has_vector:
@@ -312,7 +261,7 @@ Ensure you return the correct language code enclosed in quotes, like 'en-us' or 
 
         follow_up_questions_prompt = self.follow_up_questions_prompt_content if overrides.get("suggest_followup_questions") else ""
 
-        # STEP 3: Generate a contextual and content specific answer using the search results and chat history
+        # STEP 5: Generate a contextual and content specific answer using the search results and chat history
 
         # Allow client to replace the entire prompt, or to inject into the exiting prompt using >>>
         prompt_override = overrides.get("prompt_override")
@@ -366,58 +315,3 @@ Ensure you return the correct language code enclosed in quotes, like 'en-us' or 
                 break
         messages = message_builder.messages
         return messages
-
-    # def get_messages_from_history(self,
-    #                               system_prompt: str,
-    #                               model_id: str,
-    #                               history: list[dict[str, str]],
-    #                               user_conv: str,
-    #                               few_shots: list = [],
-    #                               max_tokens: int = 4096,
-    #                               output_format: bool = False
-    #                               ) -> list:
-    #     message_builder = MessageBuilder("", model_id)
-
-    #     # Add examples to show the chat what responses we want. 
-    #     # It will try to mimic any responses and make sure they match the rules laid out in the system message.
-    #     #for shot in few_shots:
-    #     #    message_builder.append_message(shot.get('role'), shot.get('content'))
-
-    #     # Construct the history part of the prompt (Exclude the most recent message for now)
-    #     history_content = "\n".join([f"user: {h['user']}" if 'user' in h else f"bot: {h['bot']}" for h in history[:-1]])
-
-
-    #     print("HISTORY:", history)
-    #     print("HISTORY CONTENT:", history_content)
-
-    #     # Construct the recent message part of the prompt only for query generation
-    #     if output_format:
-    #         recent_message = history[-1]["user"]
-    #         final_system_message = system_prompt.format(recent_message=recent_message, history_content=history_content)
-    #     else:
-    #         final_system_message = f"{system_prompt}\n\n{history_content}"
-
-    #     message_builder.append_message(self.SYSTEM, final_system_message)
-    #     message_builder.append_message(self.USER, user_conv)
-
-    #     # Extract the most recent user message and emphasize it in the prompt
-    #     # recent_user_message = history[-1]["user"]
-    #     # emphasized_message = f"Most recent user message: \"{recent_user_message}\". Consider the entire conversation history for context:\n"
-    #     # message_builder.append_message(self.SYSTEM, emphasized_message)
-
-    #     # # Add the rest of the history
-    #     # for h in reversed(history[:-1]):
-    #     #     if bot_msg := h.get("bot"):
-    #     #         message_builder.append_message(self.ASSISTANT, bot_msg)
-    #     #     if user_msg := h.get("user"):
-    #     #         message_builder.append_message(self.USER, user_msg)
-    #     #     if message_builder.token_length > max_tokens:
-    #     #         break
-
-    #     messages = message_builder.messages
-
-    #     # user_content = user_conv
-    #     # append_index = len(few_shots) + 1
-    #     # message_builder.append_message(self.USER, user_content, index=append_index)
-
-    #     return messages

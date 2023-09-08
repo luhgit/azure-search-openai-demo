@@ -208,27 +208,43 @@ def filename_to_id(filename):
     return f"file-{filename_ascii}-{filename_hash}"
 
 def extract_fields_from_filename(filename):
-    pattern = r'^(?P<product_id>[^_]+)_(?P<language>[^_]+)_(?P<product_type>[^_]+)_(?P<doc_type>[^\.]+)\.pdf$'
+    pattern = r'^(?P<product_id>[^_]+)_(?P<language>[^_]+)_(?P<product_type>[^_]+)_(?P<document_type>[^\.]+)\.pdf$'
     match = re.match(pattern, filename)
     if match:
         return match.groupdict()
     return None
 
+def transform_key(key):
+    return key.replace('_', ' ').capitalize()
+
+def transform_value(key, value):
+    if key in ['product_type', 'document_type']:
+        return value.replace('-', ' ').upper()
+    return value
+
 def create_sections(filename, page_map, use_vectors):
     file_id = filename_to_id(filename)
     meta_info = extract_fields_from_filename(filename)
 
+    # Convert meta info to a string representation
+    transformed_meta_info = {transform_key(key): transform_value(key, value) for key, value in meta_info.items()}
+    formatted_meta_info = "\n".join([f"{key}: {value}" for key, value in transformed_meta_info.items()])
+
     for i, (content, pagenum) in enumerate(split_text(page_map)):
+        
+        # Append meta info to the document text
+        enriched_content = f"{content}\n\n--- Meta Information ---\n{formatted_meta_info}"
+
         section = {
             "id": f"{file_id}-page-{i}",
-            "content": content,
+            "content": enriched_content,
             "category": args.category,
             "sourcepage": blob_name_from_file_page(filename, pagenum),
             "sourcefile": filename,
             "product_id": meta_info["product_id"],
             "language": meta_info["language"],
-            "product_type": meta_info["product_type"],
-            "doc_type": meta_info["doc_type"]
+            "product_type": transform_value('product_type', meta_info["product_type"]),
+            "document_type": transform_value('document_type', meta_info["document_type"])
         }
         if use_vectors:
             section["embedding"] = compute_embedding(content)
@@ -259,8 +275,8 @@ def create_search_index():
                 SearchableField(name="sourcefile", type="Edm.String", analyzer_name="standard.lucene", filterable=True, facetable=True),
                 SimpleField(name="product_id", type="Edm.String", filterable=True, facetable=True),
                 SimpleField(name="language", type="Edm.String", filterable=True, facetable=True),
-                SimpleField(name="product_type", type="Edm.String", filterable=True, facetable=True),
-                SimpleField(name="doc_type", type="Edm.String", filterable=True, facetable=True)
+                SearchableField(name="product_type", type="Edm.String", analyzer_name="standard.lucene", filterable=True, facetable=True),
+                SimpleField(name="document_type", type="Edm.String", filterable=True, facetable=True)
             ],
             semantic_settings=SemanticSettings(
                 configurations=[SemanticConfiguration(
