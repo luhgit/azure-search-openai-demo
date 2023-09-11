@@ -8,6 +8,7 @@ import re
 from core.modelhelper import get_token_limit
 from approaches.approach import AskApproach
 from core.messagebuilder import MessageBuilder
+from core.language_detector import detect_language
 from text import nonewlines
 
 
@@ -34,18 +35,6 @@ For example, if the question is 'What is the capacity of this washing machine?' 
 Cite the only the source names that are provided to you and do not mention sources that are not known to you.
 Cite the exact name of the source as provided to you and do not change the source name.
 If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_en-us_dishwasher_prodcut-manual-54.pdf][SMS8YCI03E_en-us_dishwasher_product-manual-12.pdf]' and not in '[WGB256090_en-us_dishwasher_product-manual-54.pdf, SMS8YCI03E_en-us_dishwasher_manual-12.pdf]'.
-"""
-
-    language_filter_prompt_template = """Based on the user message accurately identify the language of the message.
-If the message is in English, return "en-us". 
-If the message is in German, return "de-de". 
-If you cannot determine the language, return "unknown".
-
-Ensure you return the answer in the following format e.g., 'en-us', 'de-de', 'unknown'.
-
-Example:
-"user": "how to load the washing machine?"
-"bot": "en-us"
 """
 
     product_filter_template = """Based on the user message accurately identify the product id.
@@ -95,28 +84,7 @@ Examples:
         exclude_category = overrides.get("exclude_category") or None
         filter = "category ne '{}'".format(exclude_category.replace("'", "''")) if exclude_category else None
 
-        # STEP 1: Gnerate a language filter based on the chat history and the new question
-        language_filter_q = 'Detect the language for: ' + q
-
-        messages_language_filter = MessageBuilder(self.language_filter_prompt_template, self.chatgpt_model)
-        messages_language_filter.append_message('user', language_filter_q)
-
-        messages_language = messages_language_filter.messages
-
-        chat_completion_filter = await openai.ChatCompletion.acreate(
-            deployment_id=self.openai_deployment,
-            model=self.chatgpt_model,
-            messages=messages_language,
-            temperature=0.0,
-            max_tokens=32,
-            n=1)
-        
-        language_filter_content = chat_completion_filter.choices[0].message.content
-
-        print("Message from chat history for language filter generation: " + str(messages_language))
-        print("Generated language: " + language_filter_content + "\n")
-
-        # STEP 2: Gnerate a product filter based on the chat history and the new question
+        # STEP 1: Gnerate a product filter based on the chat history and the new question
         product_filter_q = 'Detect the product id for: ' + q
         message_product_filter = MessageBuilder(self.product_filter_template, self.chatgpt_model)
         message_product_filter.append_message('user', product_filter_q)
@@ -136,10 +104,10 @@ Examples:
         print("Message from chat history for product filter generation: " + str(messages_product))
         print("Generated product: " + product_filter_content + "\n")
 
-        language_code = language_filter_content
-        if language_code not in ['en-us', 'de-de']:
-            language_code = 'en-us'
+        # STEP 2: Gnerate a language filter based on the last question
+        language_code = detect_language(q)
         language_filter = f"language eq '{language_code}'"
+        print("Generated language: " + language_filter + "\n")
         
         product_filter = None
         product_id = product_filter_content
