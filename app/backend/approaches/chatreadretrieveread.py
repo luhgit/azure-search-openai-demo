@@ -7,6 +7,7 @@ from azure.search.documents.models import QueryType
 
 from approaches.approach import ChatApproach
 from core.messagebuilder import MessageBuilder
+from core.language_detector import detect_language
 from core.modelhelper import get_token_limit
 from text import nonewlines
 
@@ -25,7 +26,9 @@ class ChatReadRetrieveReadApproach(ChatApproach):
 
     system_message_chat_conversation = """You are a customer service assistant for BSH company, helping customers with their home appliance questions, including inquiries about purchasing new products, features, configurations, and troubleshooting.
 Start answering thanking the user for their question. Respond in a slightly informal, and helpful tone, with a brief and clear answers. 
-Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know without referring to the sources. 
+Let's proceed by steps:
+1: Is the question mentioning or referring to a specific product id? If not, ask the user for the product id if you think could help, otherwise go to step 2.
+2. Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know without referring to the sources. 
 Try to answer the question in detail and avoid to just cite the source without answering the question.
 If the question is about a specific product, describe the answer in details and avoid referring to sources if possible. e.g., providing a step by step guidance in your response.
 Avoid refering the user to the product manual or catalog and try to answer the question directly.
@@ -60,15 +63,6 @@ If you cannot generate a search query, return just the number 0.
 Return the query enclosed in the quotes for e.g., 'washing machine installation procedure'
 """
 
-    language_filter_prompt_template = """Based on the most recent user message in the conversation history below:
-Accurately identify the language of the message.
-If the message is in English, return "en-us". 
-If the message is in German, return "de-de". 
-If you cannot determine the language, return "unknown".
-
-Ensure you return the answer in the following format e.g., 'en-us', 'de-de', 'unknown'.
-"""
-
     product_filter_template = """Based on the entire conversation history below:
 Accurately identify the product id.
 Even if it's from previous messages in the conversation. 
@@ -86,15 +80,6 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
         {'role' : ASSISTANT, 'content' : 'Show the procedure to load a washing machine' },
         {'role' : USER, 'content' : 'Does my washing machine has wifi?' },
         {'role' : ASSISTANT, 'content' : 'Check for the wifi feature on the specified washing machine' }
-    ]
-
-    language_filter_prompt_few_shots = [
-        {'role' : USER, 'content' : 'how to load the washing machine?' },
-        {'role' : ASSISTANT, 'content' : 'en-us'},
-        {'role' : USER, 'content' : 'Gibt es Wifi auf meine Waschmachine mit produkt nummer WGB256090?' },
-        {'role' : ASSISTANT, 'content' : 'de-de'},
-        {'role' : USER, 'content' : 'what are the available programms for SMS6TCI00E washing machine?' },
-        {'role' : ASSISTANT, 'content' : 'en-us'}
     ]
 
     product_filter_prompt_few_shots = [
@@ -153,31 +138,7 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
         print("Message from chat history for query generation: " + str(messages_query) + "\n")
         print("Generated query: " + query_text)
         
-        # STEP 2: Gnerate a language filter based on the chat history and the new question
-        language_filter_q = 'Detect the language for: ' + history[-1]["user"]
-        messages_language_filter = self.get_messages_from_history(
-            self.language_filter_prompt_template,
-            self.chatgpt_model,
-            history,
-            language_filter_q,
-            self.language_filter_prompt_few_shots,
-            self.chatgpt_token_limit - len(language_filter_q)
-            )
-
-        chat_completion_filter = await openai.ChatCompletion.acreate(
-            deployment_id=self.chatgpt_deployment,
-            model=self.chatgpt_model,
-            messages=messages_language_filter,
-            temperature=0.0,
-            max_tokens=32,
-            n=1)
-        
-        language_filter_content = chat_completion_filter.choices[0].message.content
-
-        print("Message from chat history for language filter generation: " + str(messages_language_filter))
-        print("Generated language: " + language_filter_content + "\n")
-
-        # STEP 3: Gnerate a product filter based on the chat history and the new question
+        # STEP 2: Gnerate a product filter based on the chat history and the new question
         product_filter_q = 'Detect the product id for: ' + history[-1]["user"]
         messages_product_filter = self.get_messages_from_history(
             self.product_filter_template,
@@ -201,10 +162,10 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
         print("Message from chat history for product filter generation: " + str(messages_product_filter))
         print("Generated product: " + product_filter_content + "\n")
 
-        language_code = language_filter_content
-        if language_code not in ['en-us', 'de-de']:
-            language_code = 'en-us'
+        # STEP 2: Gnerate a language filter based on the last question
+        language_code = detect_language(history[-1]["user"])
         language_filter = f"language eq '{language_code}'"
+        print("Generated language: " + language_filter + "\n")
         
         product_filter = None
         product_id = product_filter_content
@@ -307,11 +268,11 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
         append_index = len(few_shots) + 1
         message_builder.append_message(self.USER, user_content, index=append_index)
         for h in reversed(history[:-1]):
+            if message_builder.token_length > max_tokens:
+                break
             if bot_msg := h.get("bot"):
                 message_builder.append_message(self.ASSISTANT, bot_msg, index=append_index)
             if user_msg := h.get("user"):
                 message_builder.append_message(self.USER, user_msg, index=append_index)
-            if message_builder.token_length > max_tokens:
-                break
         messages = message_builder.messages
         return messages
