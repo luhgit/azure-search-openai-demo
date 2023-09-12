@@ -3,7 +3,9 @@ from typing import Any
 import openai
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import QueryType
+import re 
 
+from core.modelhelper import get_token_limit
 from approaches.approach import AskApproach
 from core.messagebuilder import MessageBuilder
 from text import nonewlines
@@ -16,21 +18,56 @@ class RetrieveThenReadApproach(AskApproach):
     (answer) with that prompt.
     """
 
-    system_chat_template = """"You are a customer service assistant for BSH company, helping customers with their home appliance questions, including inquiries about purchasing new products, features, configurations, and troubleshooting.
-    Start answering thanking the user for their question. Respond in a slightly informal, and helpful tone, with a brief and clear answers. 
-    Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know without referring to the sources. 
-    Do not generate answers that don't use the sources below and avoid to just cite the source without answering the question. 
-    If asking a clarifying question to the user would help, ask the question. 
-    For tabular information, return it as an HTML table. Do not return markdown format. 
-    If the question is not in English, answer in the language used in the question. 
-    Each source has a name followed by a colon and the actual information; always include the source name for each fact you use in the response without referring to the sources. 
-    For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_en-us_dishwasher_manual-54.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_EN-54.pdf]'.
-    If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_en-us_dishwasher_manual-54.pdf][SMS8YCI03E_en-us_dishwasher_manual-24.pdf]' and not in '[WGB256090_en-us_dishwasher_manual-54.pdf, SMS8YCI03E_en-us_dishwasher_manual-24.pdf]'
-    The name of the source follows a special format:  <product_model_number>_<document_language>_<product_type>_<doc_type>-<page_number>.pdf. 
-    You can Use this information from source name, especially if someone is asking a question about a specific model."""
+    system_chat_template = """You are a customer service assistant for BSH company, helping customers with their home appliance questions, including inquiries about purchasing new products, features, configurations, and troubleshooting.
+Start answering thanking the user for their question. Respond in a slightly informal, and helpful tone, with a brief and clear answers. 
+Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know without referring to the sources. 
+Try to answer the question in detail and avoid to just cite the source without answering the question.
+If the question is about a specific product, describe the answer in details and avoid referring to sources if possible. e.g., providing a step by step guidance in your response.
+Avoid refering the user to the product manual or catalog and try to answer the question directly.
+If asking a clarifying question to the user would help, ask the question. 
+For tabular information, return it as an HTML table. Do not return markdown format. 
+If the question is not in English, answer in the language used in the question.
+Do not generate answers that don't use the sources below.
+Each source has a name followed by a colon and the actual information contained within the source.
+Always include the source name for each fact you use in the response. 
+For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_en-us_dishwasher_product-manual-3.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_en-us_dishwasher_product-manual-3.pdf]'. 
+Cite the only the source names that are provided to you and do not mention sources that are not known to you.
+Cite the exact name of the source as provided to you and do not change the source name.
+If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_en-us_dishwasher_prodcut-manual-54.pdf][SMS8YCI03E_en-us_dishwasher_product-manual-12.pdf]' and not in '[WGB256090_en-us_dishwasher_product-manual-54.pdf, SMS8YCI03E_en-us_dishwasher_manual-12.pdf]'.
+"""
+
+    language_filter_prompt_template = """Based on the user message accurately identify the language of the message.
+If the message is in English, return "en-us". 
+If the message is in German, return "de-de". 
+If you cannot determine the language, return "unknown".
+
+Ensure you return the answer in the following format e.g., 'en-us', 'de-de', 'unknown'.
+
+Example:
+"user": "how to load the washing machine?"
+"bot": "en-us"
+"""
+
+    product_filter_template = """Based on the user message accurately identify the product id.
+Product ids are made of alpha-numeric characters like "SMS6TCI00E", "WUU28TA8", return ONLY the product ID. 
+If the product ID isn't clear or not mentioned, return "unknown".
+If the question is general and not about a specific product, return "unknown".
+
+Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28TA8', 'unknown'.
+
+Examples:
+"user": "what is the warranty period for the Bosch washing machine model WGB256090?"
+"bot": "WGB256090"
+
+"user": 'what are the dimentions for washing machine: SMD6TCX00E?'
+"bot": "SMD6TCX00E"
+
+"user": 'how to load a washing machine?'
+"bot": "unknown"
+"""
 
     # shots/sample conversation
-    question = """
+    last_question_example = """
 
     'What is the warranty period for the Bosch washing machine model WGB256090?'
 
@@ -39,7 +76,7 @@ class RetrieveThenReadApproach(AskApproach):
     SMS8YCI03E_en-us_dishwasher_manual-54.pdf: This offer is valid for three years from the date of purchase or at least as long as we offer support and spare parts for the relevant appliance.
     WGB256090_en-us_dishwasher_manual-57.pdf: BSH offers extended warranties for some models at an additional cost. Please contact your retailer for more information.
     """
-    answer = "The warranty period for the BSH washing machine model WGB256090 is 2 years in the US and 1 year in the EU. [WGB256090_en-us_dishwasher_manual-54.pdf]"
+    last_answer_example = "The warranty period for the BSH washing machine model WGB256090 is 2 years in the US and 1 year in the EU. [WGB256090_en-us_dishwasher_manual-54.pdf]"
 
     def __init__(self, search_client: SearchClient, openai_deployment: str, chatgpt_model: str, embedding_deployment: str, sourcepage_field: str, content_field: str):
         self.search_client = search_client
@@ -48,6 +85,7 @@ class RetrieveThenReadApproach(AskApproach):
         self.embedding_deployment = embedding_deployment
         self.sourcepage_field = sourcepage_field
         self.content_field = content_field
+        self.chatgpt_token_limit = get_token_limit(chatgpt_model)
 
     async def run(self, q: str, overrides: dict[str, Any]) -> Any:
         has_text = overrides.get("retrieval_mode") in ["text", "hybrid", None]
@@ -56,6 +94,69 @@ class RetrieveThenReadApproach(AskApproach):
         top = overrides.get("top") or 3
         exclude_category = overrides.get("exclude_category") or None
         filter = "category ne '{}'".format(exclude_category.replace("'", "''")) if exclude_category else None
+
+        # STEP 1: Gnerate a language filter based on the chat history and the new question
+        language_filter_q = 'Detect the language for: ' + q
+
+        messages_language_filter = MessageBuilder(self.language_filter_prompt_template, self.chatgpt_model)
+        messages_language_filter.append_message('user', language_filter_q)
+
+        messages_language = messages_language_filter.messages
+
+        chat_completion_filter = await openai.ChatCompletion.acreate(
+            deployment_id=self.openai_deployment,
+            model=self.chatgpt_model,
+            messages=messages_language,
+            temperature=0.0,
+            max_tokens=32,
+            n=1)
+        
+        language_filter_content = chat_completion_filter.choices[0].message.content
+
+        print("Message from chat history for language filter generation: " + str(messages_language))
+        print("Generated language: " + language_filter_content + "\n")
+
+        # STEP 2: Gnerate a product filter based on the chat history and the new question
+        product_filter_q = 'Detect the product id for: ' + q
+        message_product_filter = MessageBuilder(self.product_filter_template, self.chatgpt_model)
+        message_product_filter.append_message('user', product_filter_q)
+
+        messages_product = message_product_filter.messages
+
+        chat_completion_filter = await openai.ChatCompletion.acreate(
+            deployment_id=self.openai_deployment,
+            model=self.chatgpt_model,
+            messages=messages_product,
+            temperature=0.0,
+            max_tokens=32,
+            n=1)
+        
+        product_filter_content = chat_completion_filter.choices[0].message.content
+
+        print("Message from chat history for product filter generation: " + str(messages_product))
+        print("Generated product: " + product_filter_content + "\n")
+
+        language_code = language_filter_content
+        if language_code not in ['en-us', 'de-de']:
+            language_code = 'en-us'
+        language_filter = f"language eq '{language_code}'"
+        
+        product_filter = None
+        product_id = product_filter_content
+        pattern = r'^[A-Za-z]{3}[0-9][0-9a-zA-Z]{4,8}$'
+        if re.match(pattern, product_id):
+            product_filter = f"product_id eq '{product_id}'"
+
+        if filter:
+            filter = f"{filter} and {language_filter}"
+            if product_filter:
+                filter = f"{filter} and {product_filter}"
+        else:
+            filter = language_filter
+            if product_filter:
+                filter = f"{filter} and {product_filter}"
+
+        # STEP 4: Retrieve relevant documents from the search index with the GPT optimized query
 
         # If retrieval mode includes vectors, compute an embedding for the query
         if has_vector:
@@ -99,8 +200,8 @@ class RetrieveThenReadApproach(AskApproach):
         message_builder.append_message('user', user_content)
 
         # Add shots/samples. This helps model to mimic response and make sure they match rules laid out in system message.
-        message_builder.append_message('assistant', self.answer)
-        message_builder.append_message('user', self.question)
+        message_builder.append_message('assistant', self.last_answer_example)
+        message_builder.append_message('user', self.last_question_example)
 
         messages = message_builder.messages
         chat_completion = await openai.ChatCompletion.acreate(

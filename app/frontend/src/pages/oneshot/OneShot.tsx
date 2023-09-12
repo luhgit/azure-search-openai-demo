@@ -124,15 +124,16 @@ export function Component(): JSX.Element {
         {
             key: Approaches.RetrieveThenRead,
             text: "Retrieve-Then-Read"
-        },
-        {
-            key: Approaches.ReadRetrieveRead,
-            text: "Read-Retrieve-Read"
-        },
-        {
-            key: Approaches.ReadDecomposeAsk,
-            text: "Read-Decompose-Ask"
         }
+        //,
+        //{
+        //    key: Approaches.ReadRetrieveRead,
+        //    text: "Read-Retrieve-Read"
+        //},
+        //{
+        //    key: Approaches.ReadDecomposeAsk,
+        //    text: "Read-Decompose-Ask"
+        //}
     ];
 
     return (
