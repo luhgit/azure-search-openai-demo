@@ -262,14 +262,17 @@ def create_search_index():
     index_client = SearchIndexClient(endpoint=f"https://{args.searchservice}.search.windows.net/",
                                      credential=search_creds)
     if args.index not in index_client.list_index_names():
+        
+        from azure.search.documents.indexes.models import SynonymMap
+        synonyms_map = SynonymMap(name="parentalcontrol", synonyms=["parental control", "child lock", "childproof lock"])
         index = SearchIndex(
             name=args.index,
             fields=[
                 SimpleField(name="id", type="Edm.String", key=True),
-                SearchableField(name="content", type="Edm.String", analyzer_name="standard.lucene"),
+                SearchableField(name="content", type="Edm.String", analyzer_name="standard.lucene", synonym_map_names=[synonyms_map]),
                 SearchField(name="embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
                             hidden=False, searchable=True, filterable=False, sortable=False, facetable=False,
-                            vector_search_dimensions=1536, vector_search_configuration="default"),
+                            vector_search_dimensions=1536, vector_search_configuration="default", synonyms_map_names=[synonyms_map]),
                 SimpleField(name="category", type="Edm.String", filterable=True, facetable=True),
                 SimpleField(name="sourcepage", type="Edm.String", filterable=True, facetable=True),
                 SearchableField(name="sourcefile", type="Edm.String", analyzer_name="standard.lucene", filterable=True, facetable=True),
