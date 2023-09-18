@@ -1,5 +1,5 @@
 import re
-import json
+import yaml
 from typing import Any
 import openai
 from azure.search.documents.aio import SearchClient
@@ -24,19 +24,61 @@ class ChatReadRetrieveReadApproach(ChatApproach):
     (answer) with that prompt.
     """
 
-    system_message_chat_conversation = """You are a customer service assistant for BSH company, helping customers with their home appliance questions, including inquiries about purchasing new products, features, configurations, and troubleshooting.
-Start answering thanking the user for their question. Respond in a slightly informal, and helpful tone, with a brief and clear answers. 
-Let's proceed by steps:
-1: Is the question mentioning or referring to a specific product id? If not, ask the user for the product id if you think could help, otherwise go to step 2.
-2. Answer ONLY with the facts listed in the list of sources below. If there isn't enough information below, say you don't know without referring to the sources. 
-Try to answer the question in detail and avoid to just cite the source without answering the question.
-If the question is about a specific product, describe the answer in details and avoid referring to sources if possible. e.g., providing a step by step guidance in your response.
-Avoid refering the user to the product manual or catalog and try to answer the question directly.
-If asking a clarifying question to the user would help, ask the question. 
+    system_message_chat_conversation_withid = """"You are the customer service assistant for BSH, tasked with helping customers with their home appliance inquiries, including purchasing new products, features, configurations, and troubleshooting. Your role is to provide friendly and concise responses while ensuring customer satisfaction.
+
+Here's a step-by-step guide on how to assist users effectively:
+
+Step 1: Always start by thanking the user for their question. Maintain a slightly informal, helpful tone throughout your responses.
+
+Step 2: Use only the information available in the list of sources provided below to answer the user's question. If the question is unrelated to BSH products, inform the user that you cannot provide answers for those queries. If the sources do not contain sufficient information, state that you do not have the necessary details.
+
+Step 3: Only generate responses based on the following sources provided; do not create answers from unknown sources. If you cannot find the answer, state that you do not have the necessary details.
+Provide detailed answers, avoiding simple source citations without addressing the user's question. You can repeat what's inside the source.
+Keep your answers brief and clear and human-readable. You should use bullet points if this could help.
+Do not direct the user to product manuals or catalogs; aim to answer the question directly.
+If you need additional information to assist the user, feel free to ask clarifying questions.
+Respond in the language used by the user in their question.
 For tabular information, return it as an HTML table. Do not return markdown format. 
-If the question is not in English, answer in the language used in the question.
-Do not generate answers that don't use the sources below.
-Each source has a name followed by a colon and the actual information contained within the source.
+
+Step 4: Remember to cite the exact source name when providing information in square brakets. Each source has a name followed by a colon and the actual information contained within the source.
+Always include the source name for each fact you use in the response. 
+For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_en-us_dishwasher_product-manual-3.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_en-us_dishwasher_product-manual-3.pdf]'. 
+Cite the only the source names that are provided to you and do not mention sources that are not known to you.
+Cite the exact name of the source as provided to you and do not change the source name.
+If there are multiple sources, cite each one in their own square brackets. For example, use '[WGB256090_en-us_dishwasher_prodcut-manual-54.pdf][SMS8YCI03E_en-us_dishwasher_product-manual-12.pdf]' and not in '[WGB256090_en-us_dishwasher_product-manual-54.pdf, SMS8YCI03E_en-us_dishwasher_manual-12.pdf]'.
+
+{follow_up_questions_prompt}
+{injected_prompt}
+"""
+
+    system_message_chat_conversation_nodocument = """"You are the customer service assistant for BSH, tasked with helping customers with their home appliance inquiries, including purchasing new products, features, configurations, and troubleshooting. Your role is to provide friendly and concise responses while ensuring customer satisfaction.
+
+Unfortunatly we don't have an answer for the client's question. 
+Try to suggest to reformulate the answer and if he can't find a solution for his problem he can contact our support team. 
+{follow_up_questions_prompt}
+{injected_prompt}
+"""
+
+    system_message_chat_conversation_noid = """"You are the customer service assistant for BSH, tasked with helping customers with their home appliance inquiries, including purchasing new products, features, configurations, and troubleshooting. Your role is to provide friendly and concise responses while ensuring customer satisfaction.
+
+Here's a step-by-step guide on how to assist users effectively:
+
+Step 1: Always start by thanking the user for their question. Maintain a slightly informal, helpful tone throughout your responses. 
+
+Step 2: IMPORTANT: Always ask the user to provide the ENR number and do not answer to the question. Explain that providing the product ID is beneficial because BSH offers a range of products with varying functionalities. By having this information, you can tailor your response more accurately.
+The ENR number for dishwashers can usually be found on a label, or engraved, on the top or side rim of the door, visible when the door is opened.
+For washing machines the model number can usually be found on a label on the inner rim of the door, visible when the door is opened. Sometimes it can also be found behind the filter door or on the back of the appliance.
+
+Step 3: ONLY if the user explicitly say that doesn't have the ENR, use the information available in the list of sources provided below to answer the user's question. If the question is unrelated to BSH products, inform the user that you cannot provide answers for those queries. If the sources do not contain sufficient information, state that you do not have the necessary details.
+
+Step 4: Only generate responses based on the following sources provided; do not create answers from unknown sources. If you cannot find the answer, state that you do not have the necessary details.
+Provide detailed answers, avoiding simple source citations without addressing the user's question. You can repeat what's inside the source.
+Keep your answers brief and clear and human-readable. You should use bullet points if this could help.
+Do not direct the user to product manuals or catalogs; aim to answer the question directly.
+If you need additional information to assist the user, feel free to ask clarifying questions.
+Respond in the language used by the user in their question.
+
+Step 5: Remember to cite the exact source name when providing information in square brakets. Each source has a name followed by a colon and the actual information contained within the source.
 Always include the source name for each fact you use in the response. 
 For example, if the question is 'What is the capacity of this washing machine?' and one of the information sources says 'WGB256090_en-us_dishwasher_product-manual-3.pdf: the capacity is 5kg', then answer with 'The capacity is 5kg [WGB256090_en-us_dishwasher_product-manual-3.pdf]'. 
 Cite the only the source names that are provided to you and do not mention sources that are not known to you.
@@ -45,6 +87,8 @@ If there are multiple sources, cite each one in their own square brackets. For e
 {follow_up_questions_prompt}
 {injected_prompt}
 """
+
+    answer_wrong_id = """Thanks for your question. The provided ENR seems incorrect. Please verify the product ID and try again."""
 
     follow_up_questions_prompt_content = """Generate three very brief follow-up questions that the user would likely ask next about the home appliance they are interested in or need help with. 
 Use double angle brackets to reference the questions, e.g. <<Is there a warranty on this washing machine?>>. 
@@ -64,15 +108,19 @@ Return the query enclosed in the quotes for e.g., 'washing machine installation 
 """
 
     product_filter_template = """Based on the entire conversation history below:
-Accurately identify the product id.
+You have two task.
+1: Accurately identify the product id.
 Even if it's from previous messages in the conversation. 
 If there are multiple product ids, return the most recent one.
 Ensure that the last question is still referring to the correct product id.
 Product ids are made of alpha-numeric characters like "SMS6TCI00E", "WUU28TA8". 
-If the product ID isn't clear or not mentioned, return "unknown".
-If the question is general and not about a specific product, return "unknown".
+If the product ID isn't clear or not mentioned, try to understand if the question is about a dish-washer or a washing machine. 
+If it's impossible to determine return "unknown".
 
-Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28TA8', 'unknown'.
+2: Understand if the last user question is about a washing-machine or a dish-washer.
+If it's impossible to determine return "unknown". Only possible values are "WASHING MACHINE", "DISH WASHER" and "unknown".
+
+Ensure you return the the two answers separated by a comma without spaces: e.g., 'SMD6TCX00E,WASHING MACHINE', 'WUU28TA8,DISH WASHER', 'unknown,WASHING MACHINE', 'unknown,DISH WASHER'.
 """
 
     query_prompt_few_shots = [
@@ -83,14 +131,14 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
     ]
 
     product_filter_prompt_few_shots = [
-        {'role' : USER, 'content' : 'Gibt es Wifi auf meine Waschmachine mit produkt nummer WGB256090?' },
-        {'role' : ASSISTANT, 'content' : 'WGB256090'},
-        {'role' : USER, 'content' : 'what are the available programms for washing machine I mentioned?' },
-        {'role' : ASSISTANT, 'content' : 'WGB256090'},
-        {'role' : USER, 'content' : 'how to load a washing machine?' },
-        {'role' : ASSISTANT, 'content' : 'unknown'},
-        {'role' : USER, 'content' : 'what are the dimentions for washing machine: SMD6TCX00E?' },
-        {'role' : ASSISTANT, 'content' : 'SMD6TCX00E'}
+    {'role' : USER, 'content' : 'Gibt es Wifi auf meine Waschmachine mit produkt nummer WGB256090?' },
+    {'role' : ASSISTANT, 'content' : 'WGB256090,WASHING MACHINE'},
+    {'role' : USER, 'content' : 'what are the available programms for washing machine I mentioned?' },
+    {'role' : ASSISTANT, 'content' : 'WGB256090,WASHING MACHINE'},
+    {'role' : USER, 'content' : 'how to load a washing machine?' },
+    {'role' : ASSISTANT, 'content' : 'unknown,WASHING MACHINE'},
+    {'role' : USER, 'content' : 'what are the dimentions for the dish washer: SMD6TCX00E?' },
+    {'role' : ASSISTANT, 'content' : 'SMD6TCX00E,DISH WASHER'}
     ]
 
     def __init__(self, search_client: SearchClient, chatgpt_deployment: str, chatgpt_model: str, embedding_deployment: str, sourcepage_field: str, content_field: str):
@@ -100,7 +148,16 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
         self.embedding_deployment = embedding_deployment
         self.sourcepage_field = sourcepage_field
         self.content_field = content_field
+        self.config = self.read_config()
         self.chatgpt_token_limit = get_token_limit(chatgpt_model)
+    
+    def read_config(self):
+        yaml_file_path = '../config/model_config.yaml'
+
+        # Load the YAML file
+        with open(yaml_file_path, 'r') as yaml_file:
+            config = yaml.safe_load(yaml_file)
+        return config
 
     async def run(self, history: list[dict[str, str]], overrides: dict[str, Any]) -> Any:
         has_text = overrides.get("retrieval_mode") in ["text", "hybrid", None]
@@ -114,7 +171,68 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
 
         print("prompt for query generation: " + user_q + "\n")
 
-        # STEP 1: Generate an optimized keyword search query based on the chat history and the new question
+        # STEP 1: Gnerate a product filter based on the chat history and the new question
+        product_filter_q = 'Detect only the product id for: ' + history[-1]["user"]
+        messages_product_filter = self.get_messages_from_history(
+            self.product_filter_template,
+            self.chatgpt_model,
+            history,
+            product_filter_q,
+            self.product_filter_prompt_few_shots,
+            self.chatgpt_token_limit - len(product_filter_q)
+            )
+
+        chat_completion_filter = await openai.ChatCompletion.acreate(
+            deployment_id=self.chatgpt_deployment,
+            model=self.chatgpt_model,
+            messages=messages_product_filter,
+            temperature=0.0,
+            max_tokens=32,
+            n=1)
+        
+        product_filter_content = chat_completion_filter.choices[0].message.content
+        try:
+            product_id, product_type = product_filter_content.split(',')
+        except ValueError:
+            product_id, product_type = "unknown", "unknown"
+        product_type = f"product_type eq '{product_type}'" if product_type in ["WASHING MACHINE", "DISH WASHER"] else None
+        print("Message from chat history for product filter generation: " + str(messages_product_filter))
+        print("Generated product: " + product_filter_content + "\n")
+
+        # If the product id is not correct, return an error message
+        pattern = r'^[A-Za-z]{3}[0-9][0-9a-zA-Z]{4,8}$'
+
+        if re.match(pattern, product_id) and product_id not in self.config["product_ids"]:
+            return  {"data_points": [], 
+                "answer": self.answer_wrong_id, 
+                "thoughts": "the provided product id is not present in the config-model_config.yaml file"
+                }
+        
+        # STEP 2: Genrate a language filter based on the last question
+        language_code = detect_language(history[-1]["user"])
+        language_filter = f"language eq '{language_code}'"
+        print("Generated language: " + language_filter + "\n")
+
+        # STEP 3: Define filter
+        product_filter = None
+        
+        if re.match(pattern, product_id):
+            product_filter = f"product_id eq '{product_id}'"
+
+        if filter:
+            filter = f"{filter} and {language_filter}"
+            if product_filter:
+                filter = f"{filter} and {product_filter}"
+            elif product_type:
+                filter = f"{filter} and {product_type}"
+        else:
+            filter = language_filter
+            if product_filter:
+                filter = f"{filter} and {product_filter}"
+            elif product_type:
+                filter = f"{filter} and {product_type}"
+        
+        # STEP 4: Generate an optimized keyword search query based on the chat history and the new question
         messages_query = self.get_messages_from_history(
             self.query_prompt_template,
             self.chatgpt_model,
@@ -137,50 +255,8 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
 
         print("Message from chat history for query generation: " + str(messages_query) + "\n")
         print("Generated query: " + query_text)
-        
-        # STEP 2: Gnerate a product filter based on the chat history and the new question
-        product_filter_q = 'Detect the product id for: ' + history[-1]["user"]
-        messages_product_filter = self.get_messages_from_history(
-            self.product_filter_template,
-            self.chatgpt_model,
-            history,
-            product_filter_q,
-            self.product_filter_prompt_few_shots,
-            self.chatgpt_token_limit - len(product_filter_q)
-            )
 
-        chat_completion_filter = await openai.ChatCompletion.acreate(
-            deployment_id=self.chatgpt_deployment,
-            model=self.chatgpt_model,
-            messages=messages_product_filter,
-            temperature=0.0,
-            max_tokens=32,
-            n=1)
-        
-        product_filter_content = chat_completion_filter.choices[0].message.content
-
-        print("Message from chat history for product filter generation: " + str(messages_product_filter))
-        print("Generated product: " + product_filter_content + "\n")
-
-        # STEP 2: Gnerate a language filter based on the last question
-        language_code = detect_language(history[-1]["user"])
-        language_filter = f"language eq '{language_code}'"
-        print("Generated language: " + language_filter + "\n")
-        
-        product_filter = None
-        product_id = product_filter_content
-        pattern = r'^[A-Za-z]{3}[0-9][0-9a-zA-Z]{4,8}$'
-        if re.match(pattern, product_id):
-            product_filter = f"product_id eq '{product_id}'"
-
-        if filter:
-            filter = f"{filter} and {language_filter}"
-            if product_filter:
-                filter = f"{filter} and {product_filter}"
-        else:
-            filter = language_filter
-            if product_filter:
-                filter = f"{filter} and {product_filter}"
+        print(f"Final filter {filter}")
 
         # STEP 4: Retrieve relevant documents from the search index with the GPT optimized query
 
@@ -227,11 +303,17 @@ Ensure you return the answer in the following format e.g., 'SMD6TCX00E', 'WUU28T
         # Allow client to replace the entire prompt, or to inject into the exiting prompt using >>>
         prompt_override = overrides.get("prompt_override")
         if prompt_override is None:
-            system_message = self.system_message_chat_conversation.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
-        elif prompt_override.startswith(">>>"):
-            system_message = self.system_message_chat_conversation.format(injected_prompt=prompt_override[3:] + "\n", follow_up_questions_prompt=follow_up_questions_prompt)
-        else:
-            system_message = prompt_override.format(follow_up_questions_prompt=follow_up_questions_prompt)
+            if product_filter:
+                if len(content) > 3:
+                    system_message = self.system_message_chat_conversation_withid.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
+                else:
+                    print("here")
+                    system_message = self.system_message_chat_conversation_nodocument.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
+            else:
+                if len(content) > 3:
+                    system_message = self.system_message_chat_conversation_noid.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
+                else:
+                    system_message = self.system_message_chat_conversation_nodocument.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
 
         messages_answer = self.get_messages_from_history(
             system_message + "\n\nSources:\n" + content,
