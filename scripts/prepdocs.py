@@ -264,15 +264,23 @@ def create_search_index():
     if args.index not in index_client.list_index_names():
         
         from azure.search.documents.indexes.models import SynonymMap
-        synonyms_map = SynonymMap(name="parentalcontrol", synonyms=["parental control", "child lock", "childproof lock"])
+        from azure.core.exceptions import HttpResponseError
+        try:
+            synonyms_map = SynonymMap(name="parentalcontrol", synonyms=["parental control", "child lock", "childproof lock"])
+            index_client.create_synonym_map(synonyms_map)
+        except HttpResponseError as e:
+            if e.error.code == 'ResourceNameAlreadyInUse':
+                pass
+            else:
+                raise e 
         index = SearchIndex(
             name=args.index,
             fields=[
                 SimpleField(name="id", type="Edm.String", key=True),
-                SearchableField(name="content", type="Edm.String", analyzer_name="standard.lucene", synonym_map_names=[synonyms_map]),
+                SearchableField(name="content", type="Edm.String", analyzer_name="standard.lucene", synonym_map_names=["parentalcontrol"]),
                 SearchField(name="embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
                             hidden=False, searchable=True, filterable=False, sortable=False, facetable=False,
-                            vector_search_dimensions=1536, vector_search_configuration="default", synonyms_map_names=[synonyms_map]),
+                            vector_search_dimensions=1536, vector_search_configuration="default"),
                 SimpleField(name="category", type="Edm.String", filterable=True, facetable=True),
                 SimpleField(name="sourcepage", type="Edm.String", filterable=True, facetable=True),
                 SearchableField(name="sourcefile", type="Edm.String", analyzer_name="standard.lucene", filterable=True, facetable=True),

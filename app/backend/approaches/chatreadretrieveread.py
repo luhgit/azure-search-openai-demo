@@ -153,11 +153,9 @@ Ensure you return the the two answers separated by a comma without spaces: e.g.,
         self.chatgpt_token_limit = get_token_limit(chatgpt_model)
     
     def read_config(self):
-        yaml_file_path = '../config/model_config.yaml'
-
-        # Load the YAML file
-        with open(yaml_file_path, 'r') as yaml_file:
-            config = yaml.safe_load(yaml_file)
+        config = {}
+        config["product_ids"] = ["SMD6TCX00E", "SMS6TCIOOE", "SMS8YCI03E",
+                                    "WGB256A90", "WGG254F0GB", "WGB256090", "WUU28TA8", "unknown"]
         return config
 
     async def run(self, history: list[dict[str, str]], overrides: dict[str, Any]) -> Any:
@@ -311,11 +309,8 @@ Ensure you return the the two answers separated by a comma without spaces: e.g.,
                     print("here")
                     system_message = self.system_message_chat_conversation_nodocument.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
             else:
-                if len(content) > 3:
-                    system_message = self.system_message_chat_conversation_noid.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
-                else:
-                    system_message = self.system_message_chat_conversation_nodocument.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
-
+                system_message = self.system_message_chat_conversation_noid.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
+                
         messages_answer = self.get_messages_from_history(
             system_message + "\n\nSources:\n" + content,
             self.chatgpt_model,
@@ -327,7 +322,7 @@ Ensure you return the the two answers separated by a comma without spaces: e.g.,
             deployment_id=self.chatgpt_deployment,
             model=self.chatgpt_model,
             messages=messages_answer,
-            temperature=overrides.get("temperature") or 0.7,
+            temperature=0,
             max_tokens=1024,
             n=1)
         
