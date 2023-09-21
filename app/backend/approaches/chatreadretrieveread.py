@@ -121,7 +121,7 @@ If it's impossible to determine return "unknown".
 2: Understand if the last user question is about a washing-machine or a dish-washer.
 If it's impossible to determine return "unknown". Only possible values are "WASHING MACHINE", "DISH WASHER" and "unknown".
 
-Ensure you return the the two answers separated by a comma without spaces: e.g., 'SMD6TCX00E,WASHING MACHINE', 'WUU28TA8,DISH WASHER', 'unknown,WASHING MACHINE', 'unknown,DISH WASHER'.
+Ensure you return both the two answers separated by a comma without spaces: e.g., 'SMD6TCX00E,WASHING MACHINE', 'WUU28TA8,DISH WASHER', 'unknown,WASHING MACHINE', 'unknown,DISH WASHER'.
 """
 
     query_prompt_few_shots = [
