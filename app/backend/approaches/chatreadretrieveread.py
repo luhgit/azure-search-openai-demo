@@ -25,7 +25,7 @@ class ChatReadRetrieveReadApproach(ChatApproach):
     """
 
     system_message_chat_conversation_withid = """"You are the customer service assistant for BSH, tasked with helping customers with their home appliance inquiries, including purchasing new products, features, configurations, and troubleshooting. Your role is to provide friendly and concise responses while ensuring customer satisfaction.
-    Only brands available are Bosh and Siemens, do not answer to other brands questions.
+Only brands available are Bosh and Siemens, do not answer to other brands questions.
 Here is a step-by-step guide on how to assist users effectively:
 
 Step 1: Always start by thanking the user for their question. Maintain a slightly informal, helpful tone throughout your responses.
@@ -52,16 +52,14 @@ If there are multiple sources, cite each one in their own square brackets. For e
 """
 
     system_message_chat_conversation_nodocument = """"You are the customer service assistant for BSH, tasked with helping customers with their home appliance inquiries, including purchasing new products, features, configurations, and troubleshooting. Your role is to provide friendly and concise responses while ensuring customer satisfaction.
-
 Unfortunatly we don't have an answer for the client's question. 
 Try to suggest to reformulate the answer and if he can't find a solution for his problem he can contact our support team. 
 {follow_up_questions_prompt}
 {injected_prompt}
 """
 
-    system_message_chat_conversation_noid = """"You are the customer service assistant for BSH, tasked with helping customers with their home appliance inquiries, including purchasing new products, features, configurations, and troubleshooting. Your role is to provide friendly and concise responses while ensuring customer satisfaction.
-    Only brands available are Bosh and Siemens, do not answer to other brands questions.
-
+    system_message_chat_conversation_noid = """"You are the customer service assistant for BSH, tasked with helping customers with their home appliance inquiries, including purchasing new products, features, configurations, and troubleshooting. Your role is to provide friendly and concise responses while ensuring customer satisfaction.Only brands available are Bosh and Siemens, do not answer to other brands questions.
+    
 Here's a step-by-step guide on how to assist users effectively:
 
 Step 1: Always start by thanking the user for their question. Maintain a slightly informal, helpful tone throughout your responses. 
@@ -108,21 +106,20 @@ If you cannot generate a search query, return just the number 0.
 Return the query enclosed in the quotes for e.g., 'washing machine installation procedure'
 """
 
-    product_filter_template = """Based on the entire conversation history below:
-You have two task.
-1: Accurately identify the product id.
-Even if it's from previous messages in the conversation. 
-If there are multiple product ids, return the most recent one.
+    product_filter_template = """Based on the entire conversation history below let's proceed by steps.
+Step 1: Accurately identify the product id. Even if it's from previous messages in the conversation. 
+If there are multiple product ids, the answer is the most recent one.
 Ensure that the last question is still referring to the correct product id.
-Product ids are made of alpha-numeric characters like "SMS6TCI00E", "WUU28TA8". 
+Product ids are made of alpha-numeric characters like "SMS6TCI00E", "WUU28TA8", "SBD6TCX00E". 
 If the product ID isn't clear or not mentioned, try to understand if the question is about a dish-washer or a washing machine. 
-If it's impossible to determine return "unknown".
+If it's impossible to determine the answer is "unknown".
 
-2: Understand if the last user question is about a washing-machine or a dish-washer.
-If it's impossible to determine return "unknown". Only possible values are "WASHING MACHINE", "DISH WASHER" and "unknown".
+Step 2: Accurately identify if the last user question is about a washing-machine or a dish-washer.
+If it's impossible to determine the answer is "unknown". Only possible values are "WASHING MACHINE", "DISH WASHER" and "unknown".
 
-Ensure you return both the two answers separated by a comma without spaces: e.g., 'SMD6TCX00E,WASHING MACHINE', 'WUU28TA8,DISH WASHER', 'unknown,WASHING MACHINE', 'unknown,DISH WASHER'.
+Step 3: Return the 2 answers from Step 1 and Step 2 separated by a comma without spaces: e.g., 'SMD6TCX00E,WASHING MACHINE', 'WUU28TA8,DISH WASHER', 'unknown,WASHING MACHINE', 'unknown,DISH WASHER'.
 """
+
 
     query_prompt_few_shots = [
         {'role' : USER, 'content' : 'how to load the washing machine?' },
@@ -132,8 +129,8 @@ Ensure you return both the two answers separated by a comma without spaces: e.g.
     ]
 
     product_filter_prompt_few_shots = [
-    {'role' : USER, 'content' : 'Gibt es Wifi auf meine Waschmachine mit produkt nummer WGB256090?' },
-    {'role' : ASSISTANT, 'content' : 'WGB256090,WASHING MACHINE'},
+    {'role' : USER, 'content' : 'can you tell me the measures of SBD6TCX00E?'},
+    {'role' : ASSISTANT, 'content' : 'SBD6TCX00E,unknown'},
     {'role' : USER, 'content' : 'what are the available programms for washing machine I mentioned?' },
     {'role' : ASSISTANT, 'content' : 'WGB256090,WASHING MACHINE'},
     {'role' : USER, 'content' : 'how to load a washing machine?' },
@@ -154,8 +151,20 @@ Ensure you return both the two answers separated by a comma without spaces: e.g.
     
     def read_config(self):
         config = {}
-        config["product_ids"] = ["SMD6TCX00E", "SMS6TCIOOE", "SMS8YCI03E",
-                                    "WGB256A90", "WGG254F0GB", "WGB256090", "WUU28TA8", "unknown"]
+        config["product_ids"] = ['WGB256090',
+        'SBD6TCX00E',
+        'WUU28T48',
+        'WGB256A90',
+        'WAN28250GB',
+        'WUU28TA8',
+        'SBV6ZCX49E',
+        'SMS6TCI00E',
+        'SMV6ZCX49E',
+        'WGB2560X0',
+        'SMD6TCX00E',
+        'WGG254F0GB',
+        'SMS8YCI03E',
+        'WGG25402GB', "unknown"]
         return config
 
     async def run(self, history: list[dict[str, str]], overrides: dict[str, Any]) -> Any:
@@ -191,9 +200,12 @@ Ensure you return both the two answers separated by a comma without spaces: e.g.
         
         product_filter_content = chat_completion_filter.choices[0].message.content
         try:
-            product_id, product_type = product_filter_content.split(',')
+            product_id, product_type = product_filter_content.upper().split(',')
         except ValueError:
-            product_id, product_type = "unknown", "unknown"
+            if product_filter_content.upper() in self.config["product_ids"]:
+                product_id, product_type = product_filter_content.upper(), "uknown"
+            else:
+                product_id, product_type = "unknown", "unknown"
         product_type = f"product_type eq '{product_type}'" if product_type in ["WASHING MACHINE", "DISH WASHER"] else None
         print("Message from chat history for product filter generation: " + str(messages_product_filter))
         print("Generated product: " + product_filter_content + "\n")
