@@ -110,14 +110,13 @@ Return the query enclosed in the quotes for e.g., 'washing machine installation 
 Step 1: Accurately identify the product id. Even if it's from previous messages in the conversation. 
 If there are multiple product ids, the answer is the most recent one.
 Ensure that the last question is still referring to the correct product id.
-Product ids are made of alpha-numeric characters like "SMS6TCI00E", "WUU28TA8", "SBD6TCX00E". 
-If the product ID isn't clear or not mentioned, try to understand if the question is about a dish-washer or a washing machine. 
-If it's impossible to determine the answer is "unknown".
+Product ids are made of alpha-numeric characters like "SMS6TCI00E", "WUU28TA8", "SBD6TCX00E". They start with 3 letters. 
+If it's not explicitly mentioned and it's impossible to determine the answer is "unknown".
 
 Step 2: Accurately identify if the last user question is about a washing-machine or a dish-washer.
-If it's impossible to determine the answer is "unknown". Only possible values are "WASHING MACHINE", "DISH WASHER" and "unknown".
+If it's not explicitly mentioned and it's impossible to determine the answer is "unknown". Only possible values are "WASHING MACHINE", "DISH WASHER" and "unknown".
 
-Step 3: Return the 2 answers from Step 1 and Step 2 separated by a comma without spaces: e.g., 'SMD6TCX00E,WASHING MACHINE', 'WUU28TA8,DISH WASHER', 'unknown,WASHING MACHINE', 'unknown,DISH WASHER'.
+Step 3: Return the two answers from Step 1 and Step 2 separated by a comma without spaces: e.g., 'SMD6TCX00E,WASHING MACHINE', 'WUU28TA8,DISH WASHER', 'unknown,WASHING MACHINE', 'unknown,DISH WASHER', 'unknown,unknown',.
 """
 
 
@@ -125,16 +124,23 @@ Step 3: Return the 2 answers from Step 1 and Step 2 separated by a comma without
         {'role' : USER, 'content' : 'how to load the washing machine?' },
         {'role' : ASSISTANT, 'content' : 'Show the procedure to load a washing machine' },
         {'role' : USER, 'content' : 'Does my washing machine has wifi?' },
-        {'role' : ASSISTANT, 'content' : 'Check for the wifi feature on the specified washing machine' }
+        {'role' : ASSISTANT, 'content' : 'Check for the wifi feature on the specified washing machine' }, 
+        {'role' : USER, 'content' : 'I never heard appliance voice when program is completed' },
+        {'role' : ASSISTANT, 'content' : 'How to set the volume of the signal at the end of the programme?' },
+        {'role' : USER, 'content' : 'What about child lock?' },
+        {'role' : ASSISTANT, 'content' : 'Check Parental control' },
+
     ]
 
     product_filter_prompt_few_shots = [
     {'role' : USER, 'content' : 'can you tell me the measures of SBD6TCX00E?'},
     {'role' : ASSISTANT, 'content' : 'SBD6TCX00E,unknown'},
-    {'role' : USER, 'content' : 'what are the available programms for washing machine I mentioned?' },
-    {'role' : ASSISTANT, 'content' : 'WGB256090,WASHING MACHINE'},
     {'role' : USER, 'content' : 'how to load a washing machine?' },
     {'role' : ASSISTANT, 'content' : 'unknown,WASHING MACHINE'},
+    {'role' : USER, 'content' : 'what are the available programs?' },
+    {'role' : ASSISTANT, 'content' : 'unknown,unknown'},
+    {'role' : USER, 'content' : 'how to load my washing machine with number WUU28TA8?' },
+    {'role' : ASSISTANT, 'content' : 'WUU28TA8,WASHING MACHINE'},
     {'role' : USER, 'content' : 'what are the dimentions for the dish washer: SMD6TCX00E?' },
     {'role' : ASSISTANT, 'content' : 'SMD6TCX00E,DISH WASHER'}
     ]
