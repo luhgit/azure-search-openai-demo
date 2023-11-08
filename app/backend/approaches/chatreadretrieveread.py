@@ -1,6 +1,6 @@
 import re
 import yaml
-from typing import Any
+from typing import Any, Sequence, Dict, List, Tuple, Optional
 import openai
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import QueryType
@@ -172,6 +172,28 @@ Step 3: Return the two answers from Step 1 and Step 2 separated by a comma witho
         'SMS8YCI03E',
         'WGG25402GB', "unknown"]
         return config
+    
+    async def get_answer_openai(self, prompt: str, question: str, history: List[Dict], tokens: int, few_shots: Optional[List]=[]) -> Tuple[List, str]:
+        
+        messages = self.get_messages_from_history(
+            system_prompt=prompt, 
+            model_id=self.chatgpt_model,
+            history=history,
+            user_conv=question,
+            few_shots=few_shots,
+            max_tokens=self.chatgpt_token_limit - tokens
+            )
+
+        chat_completion = await openai.ChatCompletion.acreate(
+            deployment_id=self.chatgpt_deployment,
+            model=self.chatgpt_model,
+            messages=messages, 
+            temperature=0, 
+            max_tokens=tokens, 
+            n=1)
+        
+        
+        return messages, chat_completion.choices[0].message.content
 
     async def run(self, history: list[dict[str, str]], overrides: dict[str, Any]) -> Any:
         has_text = overrides.get("retrieval_mode") in ["text", "hybrid", None]
@@ -187,24 +209,12 @@ Step 3: Return the two answers from Step 1 and Step 2 separated by a comma witho
 
         # STEP 1: Gnerate a product filter based on the chat history and the new question
         product_filter_q = 'Detect only the product id for: ' + history[-1]["user"]
-        messages_product_filter = self.get_messages_from_history(
-            self.product_filter_template,
-            self.chatgpt_model,
-            history,
-            product_filter_q,
-            self.product_filter_prompt_few_shots,
-            self.chatgpt_token_limit - len(product_filter_q)
-            )
-
-        chat_completion_filter = await openai.ChatCompletion.acreate(
-            deployment_id=self.chatgpt_deployment,
-            model=self.chatgpt_model,
-            messages=messages_product_filter,
-            temperature=0.0,
-            max_tokens=32,
-            n=1)
+        messages_product_filter, product_filter_content = await self.get_answer_openai(self.product_filter_template, 
+                                                               product_filter_q, 
+                                                               history=history,
+                                                               tokens=32, 
+                                                               few_shots=self.product_filter_prompt_few_shots)
         
-        product_filter_content = chat_completion_filter.choices[0].message.content
         try:
             product_id, product_type = product_filter_content.upper().split(',')
         except ValueError:
@@ -250,24 +260,12 @@ Step 3: Return the two answers from Step 1 and Step 2 separated by a comma witho
                 filter = f"{filter} and {product_type}"
         
         # STEP 4: Generate an optimized keyword search query based on the chat history and the new question
-        messages_query = self.get_messages_from_history(
-            self.query_prompt_template,
-            self.chatgpt_model,
-            history,
-            user_q,
-            self.query_prompt_few_shots,
-            self.chatgpt_token_limit - len(user_q)
-            )
-
-        chat_completion_query = await openai.ChatCompletion.acreate(
-            deployment_id=self.chatgpt_deployment,
-            model=self.chatgpt_model,
-            messages=messages_query,
-            temperature=0.0,
-            max_tokens=32,
-            n=1)
+        messages_query, query_content = await self.get_answer_openai(self.query_prompt_template, 
+                                                               user_q, 
+                                                               history=history,
+                                                               tokens=32, 
+                                                               few_shots=self.query_prompt_few_shots)
         
-        query_content = chat_completion_query.choices[0].message.content
         query_text = query_content
 
         print("Message from chat history for query generation: " + str(messages_query) + "\n")
@@ -328,23 +326,13 @@ Step 3: Return the two answers from Step 1 and Step 2 separated by a comma witho
                     system_message = self.system_message_chat_conversation_nodocument.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
             else:
                 system_message = self.system_message_chat_conversation_noid.format(injected_prompt="", follow_up_questions_prompt=follow_up_questions_prompt)
-                
-        messages_answer = self.get_messages_from_history(
-            system_message + "\n\nSources:\n" + content,
-            self.chatgpt_model,
-            history,
-            history[-1]["user"],
-            max_tokens=self.chatgpt_token_limit)
         
-        chat_completion_answer = await openai.ChatCompletion.acreate(
-            deployment_id=self.chatgpt_deployment,
-            model=self.chatgpt_model,
-            messages=messages_answer,
-            temperature=0,
-            max_tokens=1024,
-            n=1)
+        messages_answer, chat_content = await self.get_answer_openai(system_message + "\n\nSources:\n" + content,
+                                                               history[-1]["user"], 
+                                                               history=history,
+                                                               tokens=1024, 
+                                                               few_shots=[])
         
-        chat_content = chat_completion_answer.choices[0].message.content
         msg_to_display = '\n\n'.join([str(message) for message in messages_answer])
 
         print("Message from chat history for answer generation: " + str(messages_answer) + "\n")
@@ -356,19 +344,24 @@ Step 3: Return the two answers from Step 1 and Step 2 separated by a comma witho
                 }
 
     def get_messages_from_history(self, system_prompt: str, model_id: str, history: list[dict[str, str]], user_conv: str, few_shots = [], max_tokens: int = 4096) -> list:
-        message_builder = MessageBuilder(system_prompt, model_id)
+        message_builder = MessageBuilder(system_prompt, model_id, max_tokens=max_tokens)
+
         # Add examples to show the chat what responses we want. It will try to mimic any responses and make sure they match the rules laid out in the system message.
-        for shot in few_shots[::-1]:
+        for shot in few_shots:
             message_builder.append_message(shot.get('role'), shot.get('content'))
+
         user_content = user_conv
         append_index = len(few_shots) + 1
+
         message_builder.append_message(self.USER, user_content, index=append_index)
+
         for h in reversed(history[:-1]):
-            if message_builder.token_length > max_tokens:
-                break
             if bot_msg := h.get("bot"):
                 message_builder.append_message(self.ASSISTANT, bot_msg, index=append_index)
             if user_msg := h.get("user"):
                 message_builder.append_message(self.USER, user_msg, index=append_index)
+            if message_builder.token_length > max_tokens:
+                break
+
         messages = message_builder.messages
         return messages
